@@ -1,0 +1,366 @@
+.
+├── configs
+│   ├── callbacks
+│   │   ├── default.yaml
+│   │   ├── early_stopping.yaml
+│   │   ├── model_checkpoint.yaml
+│   │   ├── model_summary.yaml
+│   │   ├── none.yaml
+│   │   └── rich_progress_bar.yaml
+│   ├── data
+│   ├── debug
+│   │   ├── default.yaml
+│   │   ├── fdr.yaml
+│   │   ├── limit.yaml
+│   │   ├── overfit.yaml
+│   │   └── profiler.yaml
+│   ├── eval.yaml
+│   ├── experiment
+│   ├── extras
+│   │   └── default.yaml
+│   ├── hparams_search
+│   ├── hydra
+│   │   └── default.yaml
+│   ├── __init__.py
+│   ├── local
+│   ├── logger
+│   │   ├── aim.yaml
+│   │   ├── comet.yaml
+│   │   ├── csv.yaml
+│   │   ├── many_loggers.yaml
+│   │   ├── mlflow.yaml
+│   │   ├── neptune.yaml
+│   │   ├── tensorboard.yaml
+│   │   └── wandb.yaml
+│   ├── model
+│   ├── paths
+│   │   └── default.yaml
+│   ├── trainer
+│   │   ├── cpu.yaml
+│   │   ├── ddp_sim.yaml
+│   │   ├── ddp.yaml
+│   │   ├── default.yaml
+│   │   ├── gpu.yaml
+│   │   └── mps.yaml
+│   └── train.yaml
+├── data
+├── environment.yaml
+├── logs
+├── Makefile
+├── merged_output.txt
+├── mergefile.py
+├── merge_report.log
+├── notebooks
+├── pyproject.toml
+├── README.md
+├── requirements.txt
+├── scripts
+│   └── schedule.sh
+├── setup.py
+├── src
+│   ├── data
+│   ├── eval.py
+│   ├── __init__.py
+│   ├── models
+│   ├── open_clip_torch.egg-info
+│   │   ├── dependency_links.txt
+│   │   ├── PKG-INFO
+│   │   ├── SOURCES.txt
+│   │   └── top_level.txt
+│   ├── src
+│   │   ├── open_clip
+│   │   │   ├── bpe_simple_vocab_16e6.txt.gz
+│   │   │   ├── coca_model.py
+│   │   │   ├── constants.py
+│   │   │   ├── convert.py
+│   │   │   ├── factory.py
+│   │   │   ├── hf_configs.py
+│   │   │   ├── hf_model.py
+│   │   │   ├── __init__.py
+│   │   │   ├── loss.py
+│   │   │   ├── model_configs
+│   │   │   │   ├── coca_base.json
+│   │   │   │   ├── coca_roberta-ViT-B-32.json
+│   │   │   │   ├── coca_ViT-B-32.json
+│   │   │   │   ├── coca_ViT-L-14.json
+│   │   │   │   ├── convnext_base.json
+│   │   │   │   ├── convnext_base_w_320.json
+│   │   │   │   ├── convnext_base_w.json
+│   │   │   │   ├── convnext_large_d_320.json
+│   │   │   │   ├── convnext_large_d.json
+│   │   │   │   ├── convnext_large.json
+│   │   │   │   ├── convnext_small.json
+│   │   │   │   ├── convnext_tiny.json
+│   │   │   │   ├── convnext_xlarge.json
+│   │   │   │   ├── convnext_xxlarge_320.json
+│   │   │   │   ├── convnext_xxlarge.json
+│   │   │   │   ├── EVA01-g-14.json
+│   │   │   │   ├── EVA01-g-14-plus.json
+│   │   │   │   ├── EVA02-B-16.json
+│   │   │   │   ├── EVA02-E-14.json
+│   │   │   │   ├── EVA02-E-14-plus.json
+│   │   │   │   ├── EVA02-L-14-336.json
+│   │   │   │   ├── EVA02-L-14.json
+│   │   │   │   ├── MobileCLIP-B.json
+│   │   │   │   ├── MobileCLIP-S1.json
+│   │   │   │   ├── MobileCLIP-S2.json
+│   │   │   │   ├── mt5-base-ViT-B-32.json
+│   │   │   │   ├── mt5-xl-ViT-H-14.json
+│   │   │   │   ├── nllb-clip-base.json
+│   │   │   │   ├── nllb-clip-base-siglip.json
+│   │   │   │   ├── nllb-clip-large.json
+│   │   │   │   ├── nllb-clip-large-siglip.json
+│   │   │   │   ├── PE-Core-B-16.json
+│   │   │   │   ├── PE-Core-bigG-14-448.json
+│   │   │   │   ├── PE-Core-L-14-336.json
+│   │   │   │   ├── PE-Core-S-16-384.json
+│   │   │   │   ├── PE-Core-T-16-384.json
+│   │   │   │   ├── RN101.json
+│   │   │   │   ├── RN101-quickgelu.json
+│   │   │   │   ├── RN50.json
+│   │   │   │   ├── RN50-quickgelu.json
+│   │   │   │   ├── RN50x16.json
+│   │   │   │   ├── RN50x16-quickgelu.json
+│   │   │   │   ├── RN50x4.json
+│   │   │   │   ├── RN50x4-quickgelu.json
+│   │   │   │   ├── RN50x64.json
+│   │   │   │   ├── RN50x64-quickgelu.json
+│   │   │   │   ├── roberta-ViT-B-32.json
+│   │   │   │   ├── swin_base_patch4_window7_224.json
+│   │   │   │   ├── ViTamin-B.json
+│   │   │   │   ├── ViTamin-B-LTT.json
+│   │   │   │   ├── ViTamin-L2-256.json
+│   │   │   │   ├── ViTamin-L2-336.json
+│   │   │   │   ├── ViTamin-L2-384.json
+│   │   │   │   ├── ViTamin-L-256.json
+│   │   │   │   ├── ViTamin-L2.json
+│   │   │   │   ├── ViTamin-L-336.json
+│   │   │   │   ├── ViTamin-L-384.json
+│   │   │   │   ├── ViTamin-L.json
+│   │   │   │   ├── ViTamin-S.json
+│   │   │   │   ├── ViTamin-S-LTT.json
+│   │   │   │   ├── ViTamin-XL-256.json
+│   │   │   │   ├── ViTamin-XL-336.json
+│   │   │   │   ├── ViTamin-XL-384.json
+│   │   │   │   ├── ViT-B-16.json
+│   │   │   │   ├── ViT-B-16-plus-240.json
+│   │   │   │   ├── ViT-B-16-plus.json
+│   │   │   │   ├── ViT-B-16-quickgelu.json
+│   │   │   │   ├── ViT-B-16-SigLIP2-256.json
+│   │   │   │   ├── ViT-B-16-SigLIP2-384.json
+│   │   │   │   ├── ViT-B-16-SigLIP2-512.json
+│   │   │   │   ├── ViT-B-16-SigLIP-256.json
+│   │   │   │   ├── ViT-B-16-SigLIP2.json
+│   │   │   │   ├── ViT-B-16-SigLIP-384.json
+│   │   │   │   ├── ViT-B-16-SigLIP-512.json
+│   │   │   │   ├── ViT-B-16-SigLIP-i18n-256.json
+│   │   │   │   ├── ViT-B-16-SigLIP.json
+│   │   │   │   ├── ViT-B-32-256.json
+│   │   │   │   ├── ViT-B-32.json
+│   │   │   │   ├── ViT-B-32-plus-256.json
+│   │   │   │   ├── ViT-B-32-quickgelu.json
+│   │   │   │   ├── ViT-B-32-SigLIP2-256.json
+│   │   │   │   ├── ViT-bigG-14-CLIPA-336.json
+│   │   │   │   ├── ViT-bigG-14-CLIPA.json
+│   │   │   │   ├── ViT-bigG-14.json
+│   │   │   │   ├── ViT-bigG-14-quickgelu.json
+│   │   │   │   ├── ViT-bigG-14-worldwide-378.json
+│   │   │   │   ├── ViT-bigG-14-worldwide.json
+│   │   │   │   ├── ViT-e-14.json
+│   │   │   │   ├── ViT-g-14.json
+│   │   │   │   ├── ViT-gopt-16-SigLIP2-256.json
+│   │   │   │   ├── ViT-gopt-16-SigLIP2-384.json
+│   │   │   │   ├── ViT-H-14-378.json
+│   │   │   │   ├── ViT-H-14-378-quickgelu.json
+│   │   │   │   ├── ViT-H-14-CLIPA-336.json
+│   │   │   │   ├── ViT-H-14-CLIPA.json
+│   │   │   │   ├── ViT-H-14.json
+│   │   │   │   ├── ViT-H-14-quickgelu.json
+│   │   │   │   ├── ViT-H-14-worldwide-378.json
+│   │   │   │   ├── ViT-H-14-worldwide.json
+│   │   │   │   ├── ViT-H-14-worldwide-quickgelu.json
+│   │   │   │   ├── ViT-H-16.json
+│   │   │   │   ├── ViT-L-14-280.json
+│   │   │   │   ├── ViT-L-14-336.json
+│   │   │   │   ├── ViT-L-14-336-quickgelu.json
+│   │   │   │   ├── ViT-L-14-CLIPA-336.json
+│   │   │   │   ├── ViT-L-14-CLIPA.json
+│   │   │   │   ├── ViT-L-14.json
+│   │   │   │   ├── ViT-L-14-quickgelu.json
+│   │   │   │   ├── ViT-L-14-worldwide.json
+│   │   │   │   ├── ViT-L-14-worldwide-quickgelu.json
+│   │   │   │   ├── ViT-L-16-320.json
+│   │   │   │   ├── ViT-L-16.json
+│   │   │   │   ├── ViT-L-16-SigLIP2-256.json
+│   │   │   │   ├── ViT-L-16-SigLIP2-384.json
+│   │   │   │   ├── ViT-L-16-SigLIP2-512.json
+│   │   │   │   ├── ViT-L-16-SigLIP-256.json
+│   │   │   │   ├── ViT-L-16-SigLIP-384.json
+│   │   │   │   ├── ViT-M-16-alt.json
+│   │   │   │   ├── ViT-M-16.json
+│   │   │   │   ├── ViT-M-32-alt.json
+│   │   │   │   ├── ViT-M-32.json
+│   │   │   │   ├── vit_medium_patch16_gap_256.json
+│   │   │   │   ├── vit_relpos_medium_patch16_cls_224.json
+│   │   │   │   ├── ViT-S-16-alt.json
+│   │   │   │   ├── ViT-S-16.json
+│   │   │   │   ├── ViT-S-32-alt.json
+│   │   │   │   ├── ViT-S-32.json
+│   │   │   │   ├── ViT-SO400M-14-SigLIP2-378.json
+│   │   │   │   ├── ViT-SO400M-14-SigLIP2.json
+│   │   │   │   ├── ViT-SO400M-14-SigLIP-378.json
+│   │   │   │   ├── ViT-SO400M-14-SigLIP-384.json
+│   │   │   │   ├── ViT-SO400M-14-SigLIP.json
+│   │   │   │   ├── ViT-SO400M-16-SigLIP2-256.json
+│   │   │   │   ├── ViT-SO400M-16-SigLIP2-384.json
+│   │   │   │   ├── ViT-SO400M-16-SigLIP2-512.json
+│   │   │   │   ├── ViT-SO400M-16-SigLIP-i18n-256.json
+│   │   │   │   ├── xlm-roberta-base-ViT-B-32.json
+│   │   │   │   └── xlm-roberta-large-ViT-H-14.json
+│   │   │   ├── model.py
+│   │   │   ├── modified_resnet.py
+│   │   │   ├── openai.py
+│   │   │   ├── pos_embed.py
+│   │   │   ├── pretrained.py
+│   │   │   ├── push_to_hf_hub.py
+│   │   │   ├── __pycache__
+│   │   │   │   ├── coca_model.cpython-312.pyc
+│   │   │   │   ├── coca_model.cpython-313.pyc
+│   │   │   │   ├── constants.cpython-312.pyc
+│   │   │   │   ├── constants.cpython-313.pyc
+│   │   │   │   ├── convert.cpython-312.pyc
+│   │   │   │   ├── convert.cpython-313.pyc
+│   │   │   │   ├── factory.cpython-312.pyc
+│   │   │   │   ├── factory.cpython-313.pyc
+│   │   │   │   ├── hf_configs.cpython-312.pyc
+│   │   │   │   ├── hf_configs.cpython-313.pyc
+│   │   │   │   ├── hf_model.cpython-312.pyc
+│   │   │   │   ├── hf_model.cpython-313.pyc
+│   │   │   │   ├── __init__.cpython-312.pyc
+│   │   │   │   ├── __init__.cpython-313.pyc
+│   │   │   │   ├── loss.cpython-312.pyc
+│   │   │   │   ├── loss.cpython-313.pyc
+│   │   │   │   ├── model.cpython-312.pyc
+│   │   │   │   ├── model.cpython-313.pyc
+│   │   │   │   ├── modified_resnet.cpython-312.pyc
+│   │   │   │   ├── modified_resnet.cpython-313.pyc
+│   │   │   │   ├── openai.cpython-312.pyc
+│   │   │   │   ├── openai.cpython-313.pyc
+│   │   │   │   ├── pos_embed.cpython-312.pyc
+│   │   │   │   ├── pos_embed.cpython-313.pyc
+│   │   │   │   ├── pretrained.cpython-312.pyc
+│   │   │   │   ├── pretrained.cpython-313.pyc
+│   │   │   │   ├── push_to_hf_hub.cpython-312.pyc
+│   │   │   │   ├── push_to_hf_hub.cpython-313.pyc
+│   │   │   │   ├── timm_model.cpython-312.pyc
+│   │   │   │   ├── timm_model.cpython-313.pyc
+│   │   │   │   ├── tokenizer.cpython-312.pyc
+│   │   │   │   ├── tokenizer.cpython-313.pyc
+│   │   │   │   ├── transform.cpython-312.pyc
+│   │   │   │   ├── transform.cpython-313.pyc
+│   │   │   │   ├── transformer.cpython-312.pyc
+│   │   │   │   ├── transformer.cpython-313.pyc
+│   │   │   │   ├── utils.cpython-312.pyc
+│   │   │   │   ├── utils.cpython-313.pyc
+│   │   │   │   ├── version.cpython-312.pyc
+│   │   │   │   ├── version.cpython-313.pyc
+│   │   │   │   ├── zero_shot_classifier.cpython-312.pyc
+│   │   │   │   ├── zero_shot_classifier.cpython-313.pyc
+│   │   │   │   ├── zero_shot_metadata.cpython-312.pyc
+│   │   │   │   └── zero_shot_metadata.cpython-313.pyc
+│   │   │   ├── timm_model.py
+│   │   │   ├── tokenizer.py
+│   │   │   ├── transformer.py
+│   │   │   ├── transform.py
+│   │   │   ├── utils.py
+│   │   │   ├── version.py
+│   │   │   ├── zero_shot_classifier.py
+│   │   │   └── zero_shot_metadata.py
+│   │   ├── open_clip_torch.egg-info
+│   │   │   ├── dependency_links.txt
+│   │   │   ├── PKG-INFO
+│   │   │   ├── SOURCES.txt
+│   │   │   └── top_level.txt
+│   │   ├── open_clip_train
+│   │   │   ├── data.py
+│   │   │   ├── distributed.py
+│   │   │   ├── file_utils.py
+│   │   │   ├── __init__.py
+│   │   │   ├── logger.py
+│   │   │   ├── main.py
+│   │   │   ├── params.py
+│   │   │   ├── precision.py
+│   │   │   ├── profiler.py
+│   │   │   ├── __pycache__
+│   │   │   │   ├── data.cpython-312.pyc
+│   │   │   │   ├── data.cpython-313.pyc
+│   │   │   │   ├── distributed.cpython-312.pyc
+│   │   │   │   ├── distributed.cpython-313.pyc
+│   │   │   │   ├── file_utils.cpython-312.pyc
+│   │   │   │   ├── file_utils.cpython-313.pyc
+│   │   │   │   ├── __init__.cpython-312.pyc
+│   │   │   │   ├── __init__.cpython-313.pyc
+│   │   │   │   ├── logger.cpython-312.pyc
+│   │   │   │   ├── logger.cpython-313.pyc
+│   │   │   │   ├── main.cpython-312.pyc
+│   │   │   │   ├── main.cpython-313.pyc
+│   │   │   │   ├── params.cpython-312.pyc
+│   │   │   │   ├── params.cpython-313.pyc
+│   │   │   │   ├── precision.cpython-312.pyc
+│   │   │   │   ├── precision.cpython-313.pyc
+│   │   │   │   ├── scheduler.cpython-312.pyc
+│   │   │   │   ├── scheduler.cpython-313.pyc
+│   │   │   │   ├── spatial_data.cpython-312.pyc
+│   │   │   │   ├── spatial_data.cpython-313.pyc
+│   │   │   │   ├── spatial_loss.cpython-312.pyc
+│   │   │   │   ├── spatial_loss.cpython-313.pyc
+│   │   │   │   ├── train.cpython-312.pyc
+│   │   │   │   ├── train.cpython-313.pyc
+│   │   │   │   ├── zero_shot.cpython-312.pyc
+│   │   │   │   └── zero_shot.cpython-313.pyc
+│   │   │   ├── scheduler.py
+│   │   │   ├── spatial_data.py
+│   │   │   ├── spatial_loss.py
+│   │   │   ├── train.py
+│   │   │   └── zero_shot.py
+│   │   └── spaglam_preproc
+│   │       ├── cli.py
+│   │       ├── config.py
+│   │       ├── core
+│   │       │   ├── dataset_writer.py
+│   │       │   ├── gene_encoder.py
+│   │       │   ├── graph_builder.py
+│   │       │   ├── image_tiler.py
+│   │       │   └── __init__.py
+│   │       ├── __init__.py
+│   │       └── utils
+│   │           ├── anndata_utils.py
+│   │           ├── hest_loading.py
+│   │           ├── __init__.py
+│   │           ├── logging_setup.py
+│   │           ├── qc_tools.py
+│   │           └── validation.py
+│   ├── train.py
+│   └── utils
+│       ├── __init__.py
+│       ├── instantiators.py
+│       ├── logging_utils.py
+│       ├── pylogger.py
+│       ├── rich_utils.py
+│       └── utils.py
+├── tests
+│   ├── conftest.py
+│   ├── helpers
+│   │   ├── __init__.py
+│   │   ├── package_available.py
+│   │   ├── run_if.py
+│   │   └── run_sh_command.py
+│   ├── __init__.py
+│   ├── test_configs.py
+│   ├── test_datamodules.py
+│   ├── test_eval.py
+│   ├── test_sweeps.py
+│   └── test_train.py
+└── treefile.txt
+
+34 directories, 329 files

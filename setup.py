@@ -1,21 +1,14 @@
-#!/usr/bin/env python
+# 文件路径: diffusion_project/git_repo/yuanspace/setup.py
 
-from setuptools import find_packages, setup
+from setuptools import setup, find_packages
 
 setup(
-    name="src",
-    version="0.0.1",
-    description="Describe Your Cool Project",
-    author="",
-    author_email="",
-    url="https://github.com/user/project",
-    install_requires=["lightning", "hydra-core"],
-    packages=find_packages(),
-    # use this to customize global commands available in the terminal after installing the package
-    entry_points={
-        "console_scripts": [
-            "train_command = src.train:main",
-            "eval_command = src.eval:main",
-        ]
-    },
+    name="open-clip-torch",
+    version="2.20.0-dev",  # 使用一个自定义版本号以示区别
+    author="Yuanspace Custom Version",
+    packages=find_packages(where="src"),
+    package_dir={"": "src"},
+    install_requires=[
+        # 在这里可以添加您项目依赖的包，但对于可编辑安装通常不是必需的
+    ],
 )
