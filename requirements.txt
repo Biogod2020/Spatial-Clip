@@ -165,7 +165,7 @@ tinycss2==1.4.0
 tokenizers==0.21.1
 torch==2.7.1
 torch-geometric==2.6.1
-torchaudio==2.7.1
+torchaudio==2.9.0
 torchvision==0.22.1
 tornado==6.5.1
 tqdm==4.67.1
