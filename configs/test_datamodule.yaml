@@ -1,0 +1,15 @@
+# configs/test_datamodule.yaml
+
+# 我们只关心 'data' 部分的配置，所以只包含它
+defaults:
+  - _self_
+  - data: spatial # <--- 直接引用我们为 DataModule 创建的配置
+
+# 添加 paths 配置，因为 DataModule 的配置中可能会用到
+# 比如 ${paths.data_dir} 这样的变量
+paths:
+  root_dir: ${oc.env:PROJECT_ROOT}
+  data_dir: ${paths.root_dir}/data/
+  log_dir: ${paths.root_dir}/logs/
+  output_dir: ${hydra:runtime.output_dir}
+  work_dir: ${hydra:runtime.cwd}

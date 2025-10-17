@@ -1,0 +1,13 @@
+paths:
+  root_dir: ${oc.env:PROJECT_ROOT}
+  data_dir: ${paths.root_dir}/data/
+  log_dir: ${paths.root_dir}/logs/
+  output_dir: ${hydra:runtime.output_dir}
+  work_dir: ${hydra:runtime.cwd}
+data:
+  _target_: src.data.spatial_datamodule.SpatialClipDataModule
+  data_dir: data/hest_hugo_6nei_correct_parquet_data
+  k_neighbors: 6
+  batch_size: 128
+  num_workers: 8
+  pin_memory: true
