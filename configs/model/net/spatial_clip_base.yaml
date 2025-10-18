@@ -1,0 +1,4 @@
+# configs/model/net/spatial_clip_base.yaml
+_target_: src.models.components.spatial_clip_net.SpatialClipNet
+model_name: ViT-B-32
+pretrained: laion2b_s34b_b79k

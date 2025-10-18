@@ -1,19 +1,31 @@
-_target_: lightning.pytorch.trainer.Trainer
+# configs/trainer/default.yaml
 
-default_root_dir: ${paths.output_dir}
+_target_: lightning.pytorch.Trainer
 
-min_epochs: 1 # prevents early stopping
-max_epochs: 10
 
-accelerator: cpu
-devices: 1
+# --- 训练流程控制 ---
+min_epochs: 1
+max_epochs: 50
 
-# mixed precision for extra speed-up
-# precision: 16
+# --- 硬件与性能 ---
+# CodeGuardian: 使用 "auto" 让 Lightning 智能选择最佳后端
+accelerator: "auto"
+devices: "auto"
+# 在支持的硬件上（如 A100）使用 'bf16-mixed'，否则使用 "16-mixed"
+precision: "bf16-mixed"
 
-# perform a validation loop every N training epochs
+# --- 健壮性 ---
+# 添加梯度裁剪，防止梯度爆炸
+gradient_clip_val: 1.0
+
+# --- 验证与日志 ---
 check_val_every_n_epoch: 1
+log_every_n_steps: 50 # 增加日志记录频率
 
-# set True to to ensure deterministic results
-# makes training slower but gives more reproducibility than just setting seeds
-deterministic: False
+# --- 调试与复现性 ---
+# CodeGuardian: 关键修复！在此处将 fast_dev_run 定义为 trainer 的一个合法参数。
+# 默认值为 false，允许从命令行通过 trainer.fast_dev_run=True 进行“覆盖”而不是“添加”。
+fast_dev_run: false
+
+# for full reproducibility
+deterministic: false

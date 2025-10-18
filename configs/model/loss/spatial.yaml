@@ -1,0 +1,9 @@
+# configs/model/loss/spatial.yaml
+_target_: src.models.components.losses.SpatialLoss
+
+local_loss: false
+gather_with_grad: true
+cap_logit_scale: 40.0
+temp_reg_weight: 0.05
+neighbor_alpha_scale: 0.5
+float32_logits: true

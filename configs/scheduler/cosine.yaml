@@ -1,0 +1,5 @@
+# 使用 huggingface transformers 的调度器，功能更强大
+_target_: transformers.get_cosine_schedule_with_warmup
+_partial_: true
+num_warmup_steps: 2000 
+# num_training_steps 将在代码中动态设置

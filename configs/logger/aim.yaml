@@ -1,28 +1,6 @@
-# https://aimstack.io/
+# configs/logger/aim.yaml
+_target_: lightning.pytorch.loggers.AimLogger
 
-# example usage in lightning module:
-# https://github.com/aimhubio/aim/blob/main/examples/pytorch_lightning_track.py
-
-# open the Aim UI with the following command (run in the folder containing the `.aim` folder):
-# `aim up`
-
-aim:
-  _target_: aim.pytorch_lightning.AimLogger
-  repo: ${paths.root_dir} # .aim folder will be created here
-  # repo: "aim://ip_address:port" # can instead provide IP address pointing to Aim remote tracking server which manages the repo, see https://aimstack.readthedocs.io/en/latest/using/remote_tracking.html#
-
-  # aim allows to group runs under experiment name
-  experiment: null # any string, set to "default" if not specified
-
-  train_metric_prefix: "train/"
-  val_metric_prefix: "val/"
-  test_metric_prefix: "test/"
-
-  # sets the tracking interval in seconds for system usage metrics (CPU, GPU, memory, etc.)
-  system_tracking_interval: 10 # set to null to disable system metrics tracking
-
-  # enable/disable logging of system params such as installed packages, git info, env vars, etc.
-  log_system_params: true
-
-  # enable/disable tracking console logs (default value is true)
-  capture_terminal_logs: false # set to false to avoid infinite console log loop issue https://github.com/aimhubio/aim/issues/2550
+experiment: "Spatial-CLIP-Experiments" # Aim UI 中显示的项目名称
+name: ${name} # 每个运行的名称，将从主配置中动态传入
+repo: ${paths.log_dir}/aim # Aim 数据库的存储位置

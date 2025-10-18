@@ -1,49 +1,43 @@
-# @package _global_
+# configs/train.yaml
 
-# specify here default configuration
-# order of defaults determines the order in which configs override each other
+# CodeGuardian: 这是项目的“总配方”。它定义了一个完整实验所需的所有组件的默认来源。
+# _self_ 必须放在第一位，这是 Hydra 的最佳实践。
 defaults:
   - _self_
-  - data: mnist
-  - model: mnist
-  - callbacks: default
-  - logger: null # set logger here or use command line (e.g. `python train.py logger=tensorboard`)
-  - trainer: default
+  - data: spatial          # 默认使用 spatial 数据
+  - model: spatial_clip    # 默认使用 spatial_clip 模型
+  - optimizer: adamw       # 默认使用 adamw 优化器
+  - scheduler: cosine      # 默认使用 cosine 调度器
+  - callbacks: default     # 默认使用 default 回调
+  - logger: aim            # 默认使用 aim 日志记录器
+  - trainer: default       # 默认使用 default 训练器配置
   - paths: default
   - extras: default
   - hydra: default
 
-  # experiment configs allow for version control of specific hyperparameters
-  # e.g. best hyperparameters for given model and datamodule
+  # --- 可选的覆盖组 ---
+  # 实验配置将覆盖上述默认值。`null` 是一个占位符，可以通过命令行填充。
   - experiment: null
-
-  # config for hyperparameter optimization
+  
+  # 用于超参数搜索
   - hparams_search: null
-
-  # optional local config for machine/user specific settings
-  # it's optional since it doesn't need to exist and is excluded from version control
+  
+  # 用于本地机器特定设置（此文件不在版本控制中）
   - optional local: default
-
-  # debugging config (enable through command line, e.g. `python train.py debug=default)
+  
+  # 用于调试
   - debug: null
 
-# task name, determines output directory path
+# --- 全局参数 ---
 task_name: "train"
-
-# tags to help you identify your experiments
-# you can overwrite this in experiment configs
-# overwrite from command line with `python train.py tags="[first_tag, second_tag]"`
 tags: ["dev"]
+name: "default_run"  # 默认的运行名称
 
-# set False to skip model training
 train: True
+test: True  # 在训练后运行测试
 
-# evaluate on test set, using best model weights achieved during training
-# lightning chooses best weights based on the metric specified in checkpoint callback
-test: True
-
-# simply provide checkpoint path to resume training
 ckpt_path: null
 
-# seed for random number generators in pytorch, numpy and python.random
-seed: null
+seed: 42
+
+optimized_metric: "val/loss" # 用于超参数搜索的目标指标

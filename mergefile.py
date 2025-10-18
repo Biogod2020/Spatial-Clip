@@ -6,6 +6,7 @@ import sys
 import json
 import re
 from collections import defaultdict
+from typing import Tuple, Optional, Dict, Any
 
 # ========== 配置区 ==========
 
@@ -30,11 +31,14 @@ EXCLUDE_EXT = {
     "class", "jar", "pyc", "pyo", "obj", "apk", "war"
 }
 
+# 要排除的目录名
+EXCLUDE_DIRS = {"node_modules", ".git", "__pycache__", "build", "dist"}
+
 # 最大允许合并的字符数（防止过大文件） — 可调
 MAX_CHAR_COUNT = 1_000_000  # 超过就跳过
 
 # 最大文件字节数限制（如果觉得有些文件过大在磁盘上就不要读） — 可设 None 表示不限制
-MAX_FILE_SIZE = None  
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 示例：5 MB
 
 # 警戒线：当文件大小 / 字符数 达到此阈值时发警告（但仍可能合并）
 WARNING_BYTE_THRESHOLD = 200 * 1024  # 200 KB
@@ -49,6 +53,9 @@ def is_base64_line(line: str, min_length: int = 200) -> bool:
     s = line.strip()
     if len(s) < min_length:
         return False
+    # 增加一个简单判断，避免纯文本被误判
+    if ' ' in s:
+        return False
     if _BASE64_RE.fullmatch(s):
         return True
     return False
@@ -58,15 +65,15 @@ def strip_notebook_base64(nb_obj):
     if isinstance(nb_obj, dict):
         new = {}
         for k, v in nb_obj.items():
-            if k == "data" and isinstance(v, (str, dict)):
-                if isinstance(v, str):
-                    if "base64" in v:
-                        new[k] = ""
+            if k == "data" and isinstance(v, dict):
+                 # 移除包含 base64 的常见 mime 类型
+                new_data = {}
+                for mime_type, content in v.items():
+                    if "image/" in mime_type and isinstance(content, str):
+                        new_data[mime_type] = "<base64_image_removed>"
                     else:
-                        new[k] = v
-                else:
-                    new[k] = {subk: ("" if (isinstance(subv, str) and "base64" in subv) else strip_notebook_base64(subv))
-                              for subk, subv in v.items()}
+                        new_data[mime_type] = strip_notebook_base64(content)
+                new[k] = new_data
             else:
                 new[k] = strip_notebook_base64(v)
         return new
@@ -75,165 +82,170 @@ def strip_notebook_base64(nb_obj):
     else:
         return nb_obj
 
-def count_chars_in_text(text: str) -> int:
-    return len(text)
-
-def should_include(filepath: str) -> bool:
-    """判断这个文件是否应该被考虑（基础过滤）"""
+def should_include(filepath: str) -> Tuple[bool, Optional[str]]:
+    """
+    判断这个文件是否应该被考虑（基础过滤）。
+    返回 (是否包含, 如果不包含则返回原因)
+    """
+    # 检查是否在排除目录中
     parts = filepath.split(os.sep)
-    for p in ("node_modules", ".git", "__pycache__", "build", "dist"):
-        if p in parts:
-            return False
+    if any(p in EXCLUDE_DIRS for p in parts):
+        return False, f"In excluded directory (e.g., {next(p for p in parts if p in EXCLUDE_DIRS)})"
+
+    # 检查扩展名
     _, ext = os.path.splitext(filepath)
     ext = ext.lower().lstrip(".")
-    # 如果没有扩展名，通常忽略
-    if ext == "":
-        return False
-    # 如果在排除名单，跳过
+    if not ext:
+        return False, "No extension"
     if ext in EXCLUDE_EXT:
-        return False
-    # 如果不在 include 列表，也跳过
+        return False, f"Excluded extension (.{ext})"
     if ext not in INCLUDE_EXT:
-        return False
+        return False, f"Extension not in include list (.{ext})"
+
     # 文件大小硬限制
     if MAX_FILE_SIZE is not None:
         try:
-            if os.path.getsize(filepath) > MAX_FILE_SIZE:
-                return False
-        except OSError:
-            return False
-    return True
+            size = os.path.getsize(filepath)
+            if size > MAX_FILE_SIZE:
+                return False, f"Exceeds max file size ({size} > {MAX_FILE_SIZE} bytes)"
+        except OSError as e:
+            return False, f"Cannot access file: {e}"
+            
+    return True, None
 
-def process_file(filepath: str):
+def process_file(filepath: str) -> Tuple[str, Optional[str], Dict[str, Any], Optional[str]]:
     """
-    处理单个文件：
-    返回 (include_flag, info, content, warning_msg)
-    - include_flag: 是否合并
+    处理单个文件。
+    返回 (status, reason, info, content)
+    - status: "INCLUDED", "SKIPPED"
+    - reason: 如果 SKIPPED, 则为原因
     - info: dict 包含 path, size_bytes, char_count
-    - content: 待写入的文本内容（剔除 base64 行等），如果不合并则为 None
-    - warning_msg: 若触发警戒线，则返回提示字符串，否则 None
+    - content: 待写入的文本内容（剔除 base64 行等）
     """
-    info = {
-        "path": filepath,
-        "size_bytes": None,
-        "char_count": None,
-    }
+    info = { "path": filepath, "size_bytes": -1, "char_count": -1 }
     try:
-        size = os.path.getsize(filepath)
-        info["size_bytes"] = size
+        info["size_bytes"] = os.path.getsize(filepath)
     except OSError:
-        info["size_bytes"] = -1
+        pass # size 保持 -1
 
     _, ext = os.path.splitext(filepath)
     ext = ext.lower().lstrip(".")
 
-    # 专门处理 .ipynb
-    if ext == "ipynb":
-        try:
-            with open(filepath, encoding='utf-8') as f:
-                nb = json.load(f)
-        except Exception as e:
-            # JSON 解析失败，回退为普通文本处理
-            ext = "txt"
-        else:
-            nb_clean = strip_notebook_base64(nb)
-            text = json.dumps(nb_clean, indent=2, ensure_ascii=False)
-            char_count = count_chars_in_text(text)
-            info["char_count"] = char_count
-            # 超过最大允许字符数则跳过
-            if MAX_CHAR_COUNT is not None and char_count > MAX_CHAR_COUNT:
-                return False, info, None, None
-            # 警戒线提示
-            warning = None
-            if ((WARNING_BYTE_THRESHOLD is not None and info["size_bytes"] is not None and info["size_bytes"] >= WARNING_BYTE_THRESHOLD)
-                or (WARNING_CHAR_THRESHOLD is not None and char_count >= WARNING_CHAR_THRESHOLD)):
-                warning = f"⚠️ WARNING: file near threshold (size={info['size_bytes']} bytes, chars={char_count})"
-            return True, info, text + "\n", warning
+    content_to_process = ""
+    is_notebook = False
 
-    # 普通文本 / 代码 / 脚本 文件
+    # 1. 读取文件内容
     try:
-        with open(filepath, encoding='utf-8', errors="ignore") as f:
-            raw = f.read()
+        if ext == "ipynb":
+            with open(filepath, 'r', encoding='utf-8') as f:
+                nb = json.load(f)
+                nb_clean = strip_notebook_base64(nb)
+                content_to_process = json.dumps(nb_clean, indent=2, ensure_ascii=False)
+                is_notebook = True
+        else:
+            with open(filepath, 'r', encoding='utf-8', errors="ignore") as f:
+                content_to_process = f.read()
     except Exception as e:
-        info["char_count"] = 0
-        return False, info, None, None
+        return "SKIPPED", f"Failed to read or parse file: {e}", info, None
 
-    char_count = count_chars_in_text(raw)
+    # 2. 计算字符数并检查限制
+    char_count = len(content_to_process)
     info["char_count"] = char_count
-    # 如果字符数超过最大允许，跳过
     if MAX_CHAR_COUNT is not None and char_count > MAX_CHAR_COUNT:
-        return False, info, None, None
+        reason = f"Exceeds max character count ({char_count} > {MAX_CHAR_COUNT})"
+        return "SKIPPED", reason, info, None
 
-    # 逐行过滤极可能的 Base64 行
-    lines = raw.splitlines(keepends=True)
-    filtered = []
-    for line in lines:
-        if not is_base64_line(line):
-            filtered.append(line)
-    content = "".join(filtered) + "\n"
+    # 3. 内容后处理（如过滤 base64）
+    final_content = ""
+    if not is_notebook:
+        lines = content_to_process.splitlines(keepends=True)
+        filtered_lines = [line for line in lines if not is_base64_line(line)]
+        final_content = "".join(filtered_lines)
+    else:
+        final_content = content_to_process
+    
+    final_content += "\n"
 
+    # 4. 检查警告阈值
     warning = None
-    if ((WARNING_BYTE_THRESHOLD is not None and info["size_bytes"] is not None and info["size_bytes"] >= WARNING_BYTE_THRESHOLD)
-        or (WARNING_CHAR_THRESHOLD is not None and char_count >= WARNING_CHAR_THRESHOLD)):
-        warning = f"⚠️ WARNING: file near threshold (size={info['size_bytes']} bytes, chars={char_count})"
+    size_bytes = info.get("size_bytes", 0) or 0
+    if ((WARNING_BYTE_THRESHOLD is not None and size_bytes >= WARNING_BYTE_THRESHOLD) or
+        (WARNING_CHAR_THRESHOLD is not None and char_count >= WARNING_CHAR_THRESHOLD)):
+        warning = f"File near/over threshold (size={size_bytes} bytes, chars={char_count})"
 
-    return True, info, content, warning
+    return "INCLUDED", warning, info, final_content
 
 def main(base_dir: str):
-    file_list = []
-    for root, dirs, files in os.walk(base_dir):
-        dirs[:] = [d for d in dirs if d not in ("node_modules", ".git", "__pycache__", "build", "dist")]
-        for fn in files:
-            full = os.path.join(root, fn)
-            if should_include(full):
-                file_list.append(full)
-    file_list.sort()
-
-    skipped = []
-    included = []
-    # 用于按扩展名统计合并了多少文件、总字节数、总字符数
+    included_stats = []
+    skipped_stats = []
+    filtered_stats = []
+    
     stats_by_ext = defaultdict(lambda: {"count": 0, "bytes": 0, "chars": 0})
 
-    # 打开日志报告文件
-    log_fp = open(LOG_REPORT_PATH, "w", encoding='utf-8')
+    with open(LOG_REPORT_PATH, "w", encoding='utf-8') as log_fp, \
+         open(OUTPUT_PATH, "w", encoding='utf-8') as out_fp:
 
-    with open(OUTPUT_PATH, "w", encoding='utf-8') as out_fp:
-        for fp in file_list:
-            inc, info, content, warning = process_file(fp)
-            if inc:
-                included.append(info)
-                # 写标题
-                out_fp.write(f"===== {info['path']} =====\n")
-                # 写警告（若有）
-                if warning:
-                    out_fp.write(f"# {warning}\n")
-                    log_fp.write(f"WARNING: {info['path']} — size {info['size_bytes']} bytes, chars {info['char_count']}\n")
-                # 写内容
-                out_fp.write(content)
+        for root, dirs, files in os.walk(base_dir):
+            # 优化：在 walk 过程中直接排除目录
+            dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+            
+            for filename in files:
+                filepath = os.path.join(root, filename)
 
-                # 更新统计
-                _, ext = os.path.splitext(info["path"])
-                ext = ext.lower().lstrip(".")
-                stats_by_ext[ext]["count"] += 1
-                stats_by_ext[ext]["bytes"] += info["size_bytes"] or 0
-                stats_by_ext[ext]["chars"] += info["char_count"] or 0
-            else:
-                skipped.append(info)
-                log_fp.write(f"SKIPPED: {info['path']} — size {info['size_bytes']} bytes, chars {info['char_count']}\n")
+                # 第一道关卡：基础过滤
+                is_ok, reason = should_include(filepath)
+                if not is_ok:
+                    filtered_stats.append({"path": filepath, "reason": reason})
+                    log_fp.write(f"[FILTERED] {filepath}: {reason}\n")
+                    continue
 
-    # 写统计报告尾部
-    log_fp.write("\n=== Summary ===\n")
-    log_fp.write(f"Merged {len(included)} files into {OUTPUT_PATH}\n")
-    log_fp.write(f"Skipped {len(skipped)} files\n")
-    log_fp.write("Stats by extension:\n")
-    for ext, d in sorted(stats_by_ext.items()):
-        log_fp.write(f"  .{ext}: count={d['count']}, total_bytes={d['bytes']}, total_chars={d['chars']}\n")
-    log_fp.close()
+                # 第二道关卡：详细处理和内容过滤
+                status, reason_or_warning, info, content = process_file(filepath)
+                
+                if status == "INCLUDED":
+                    included_stats.append(info)
+                    out_fp.write(f"===== {info['path']} =====\n")
+                    
+                    if reason_or_warning: # 这时是 warning
+                        warning_msg = f"⚠️ WARNING: {reason_or_warning}"
+                        out_fp.write(f"# {warning_msg}\n")
+                        log_fp.write(f"[WARNING]  {info['path']}: {reason_or_warning}\n")
 
-    # 同时在 stdout / stderr 输出摘要
-    print(f"Merged {len(included)} files into {OUTPUT_PATH}, skipped {len(skipped)} files. See {LOG_REPORT_PATH} for details.")
+                    out_fp.write(content)
+
+                    # 更新统计
+                    _, ext = os.path.splitext(info["path"])
+                    ext = ext.lower().lstrip(".")
+                    stats_by_ext[ext]["count"] += 1
+                    stats_by_ext[ext]["bytes"] += info.get("size_bytes", 0) or 0
+                    stats_by_ext[ext]["chars"] += info.get("char_count", 0) or 0
+
+                elif status == "SKIPPED":
+                    skipped_stats.append(info)
+                    log_fp.write(f"[SKIPPED]  {info['path']}: {reason_or_warning} (size={info['size_bytes']}, chars={info['char_count']})\n")
+
+        # --- 生成报告 ---
+        log_fp.write("\n" + "="*20 + " Summary " + "="*20 + "\n")
+        log_fp.write(f"Total files merged: {len(included_stats)}\n")
+        log_fp.write(f"Total files skipped (content reasons): {len(skipped_stats)}\n")
+        log_fp.write(f"Total files filtered (path/size reasons): {len(filtered_stats)}\n\n")
+        
+        log_fp.write("Stats for merged files by extension:\n")
+        for ext, d in sorted(stats_by_ext.items()):
+            log_fp.write(f"  .{ext:<8} | Count: {d['count']:>4} | Total Bytes: {d['bytes']:>10,} | Total Chars: {d['chars']:>10,}\n")
+
+    # 在 stdout 输出摘要
+    summary_msg = (
+        f"✅ Done! Merged {len(included_stats)} files into {OUTPUT_PATH}.\n"
+        f" Skipped {len(skipped_stats)} files and filtered {len(filtered_stats)} files. "
+        f"See {LOG_REPORT_PATH} for full details."
+    )
+    print(summary_msg)
 
 if __name__ == "__main__":
-    base = sys.argv[1] if len(sys.argv) > 1 else "."
-    main(base)
-
+    # 如果提供了路径，则使用它；否则使用当前目录
+    base_directory = sys.argv[1] if len(sys.argv) > 1 else "."
+    if not os.path.isdir(base_directory):
+        print(f"Error: Provided path '{base_directory}' is not a valid directory.", file=sys.stderr)
+        sys.exit(1)
+    main(base_directory)

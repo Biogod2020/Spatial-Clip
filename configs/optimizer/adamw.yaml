@@ -1,0 +1,6 @@
+_target_: torch.optim.AdamW
+_partial_: true  # CodeGuardian: 关键！延迟实例化，以便在代码中传入 model.parameters()
+lr: 0.001
+betas: [0.9, 0.98]
+eps: 1.0e-6
+weight_decay: 0.1

@@ -1,3 +1,5 @@
+# 文件路径: src/train.py
+
 from typing import Any, Dict, List, Optional, Tuple
 
 import hydra
@@ -60,6 +62,17 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     log.info(f"Instantiating model <{cfg.model._target_}>")
     model: LightningModule = hydra.utils.instantiate(cfg.model)
 
+    # <<< CodeGuardian's Architectural Fix: The "Handshake" >>>
+    # The DataModule needs the model's tokenizer and preprocess functions.
+    # This is the correct place to link them, before the Trainer starts its lifecycle hooks.
+    # We access them via `model.net` because the `SpatialClipNet` component holds these objects.
+    log.info("Performing model-datamodule handshake for tokenizer and preprocessing functions.")
+    if hasattr(model, "net") and hasattr(datamodule, "preprocess_fn"):
+        datamodule.preprocess_fn = model.net.preprocess_train  # Use train transforms for training
+    if hasattr(model, "net") and hasattr(datamodule, "tokenizer"):
+        datamodule.tokenizer = model.net.tokenizer
+    # <<< End of Fix >>>
+
     log.info("Instantiating callbacks...")
     callbacks: List[Callback] = instantiate_callbacks(cfg.get("callbacks"))
 
@@ -94,6 +107,15 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         if ckpt_path == "":
             log.warning("Best ckpt not found! Using current weights for testing...")
             ckpt_path = None
+        
+        #
+        # CodeGuardian Note: When testing after training, it's crucial to use the validation/test transforms.
+        # We need to perform another handshake to update the datamodule's preprocessor.
+        if hasattr(model, "net") and hasattr(datamodule, "preprocess_fn"):
+            log.info("Performing model-datamodule handshake for test-time preprocessing.")
+            datamodule.preprocess_fn = model.net.preprocess_val
+        #
+        
         trainer.test(model=model, datamodule=datamodule, ckpt_path=ckpt_path)
         log.info(f"Best ckpt path: {ckpt_path}")
 
