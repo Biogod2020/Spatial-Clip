@@ -5,6 +5,7 @@ from typing import Any, Dict
 import hydra
 import torch
 from torchmetrics import MetricCollection
+from .components.metrics import ContrastiveMetrics
 from lightning import LightningModule
 from omegaconf import DictConfig
 
@@ -23,9 +24,9 @@ class SpatialClipLitModule(LightningModule):
         loss_fn: SpatialLoss,
         optimizer_cfg: DictConfig,  # CodeGuardian: 这里接收的是一个 partial 对象
         scheduler_cfg: DictConfig,  # CodeGuardian: 这里接收的是一个 partial 对象
-        train_metrics: MetricCollection,
-        val_metrics: MetricCollection,
-        test_metrics: MetricCollection,
+        train_metrics: ContrastiveMetrics,
+        val_metrics: ContrastiveMetrics,
+        test_metrics: ContrastiveMetrics,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["net", "loss_fn"])
@@ -69,16 +70,16 @@ class SpatialClipLitModule(LightningModule):
         else: # test
             self.test_metrics.update(logits_per_image, ground_truth)
             
-            
+
         # --- Logging ---
-        self.log(f"{step_name}/loss", loss, on_step=(step_name=="train"), on_epoch=True, prog_bar=True)
-        # log_dict is the key. It automatically logs all metrics in the collection.
+        # In _step method
+        self.log(f"{step_name}/loss", loss, on_step=(step_name=="train"), on_epoch=True, prog_bar=True, sync_dist=True)
         if step_name == "train":
-            self.log_dict(self.train_metrics, on_step=False, on_epoch=True)
+            self.log_dict(self.train_metrics, on_step=False, on_epoch=True, sync_dist=True)
         elif step_name == "val":
-            self.log_dict(self.val_metrics, on_step=False, on_epoch=True)
+            self.log_dict(self.val_metrics, on_step=False, on_epoch=True, sync_dist=True)
         else:
-            self.log_dict(self.test_metrics, on_step=False, on_epoch=True)
+            self.log_dict(self.test_metrics, on_step=False, on_epoch=True, sync_dist=True)
 
         return loss
 
