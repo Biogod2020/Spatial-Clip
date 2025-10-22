@@ -26,6 +26,9 @@ log_every_n_steps: 50 # 增加日志记录频率
 # CodeGuardian: 关键修复！在此处将 fast_dev_run 定义为 trainer 的一个合法参数。
 # 默认值为 false，允许从命令行通过 trainer.fast_dev_run=True 进行“覆盖”而不是“添加”。
 fast_dev_run: false
+limit_train_batches: 1.0  # Use 1.0 for 100% of batches
+limit_val_batches: 1.0
+limit_test_batches: 1.0
 
 # for full reproducibility
 deterministic: false

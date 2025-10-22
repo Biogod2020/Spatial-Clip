@@ -1,0 +1,3 @@
+# configs/metrics/contrastive.yaml
+_target_: src.models.components.metrics.ContrastiveMetrics
+# The 'num_classes' and 'prefix' arguments will be passed from the model config.

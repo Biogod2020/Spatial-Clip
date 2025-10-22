@@ -48,9 +48,29 @@ class SpatialClipLitModule(LightningModule):
         loss_dict = self.loss_fn(**loss_input, output_dict=True)
         loss = loss_dict["contrastive_loss"]
         
-        self.log(f"{step_name}/loss", loss, on_step=(step_name=="train"), on_epoch=True, prog_bar=True, logger=True)
-        if step_name == "train" and self.trainer and self.trainer.optimizers:
-            self.log("lr", self.trainer.optimizers[0].param_groups[0]['lr'], on_step=True, on_epoch=False, prog_bar=True, logger=True)
+        
+        # --- Generic Metric Update ---
+        logits_per_image = features["image_features"] @ features["text_features"].T * features["logit_scale"]
+        ground_truth = torch.arange(len(logits_per_image), device=self.device)
+        
+        # The module just calls update(), it doesn't know what's inside
+        if step_name == "train":
+            self.train_metrics.update(logits_per_image, ground_truth)
+        elif step_name == "val":
+            self.val_metrics.update(logits_per_image, ground_truth)
+        else: # test
+            self.test_metrics.update(logits_per_image, ground_truth)
+            
+            
+        # --- Logging ---
+        self.log(f"{step_name}/loss", loss, on_step=(step_name=="train"), on_epoch=True, prog_bar=True)
+        # log_dict is the key. It automatically logs all metrics in the collection.
+        if step_name == "train":
+            self.log_dict(self.train_metrics, on_step=False, on_epoch=True)
+        elif step_name == "val":
+            self.log_dict(self.val_metrics, on_step=False, on_epoch=True)
+        else:
+            self.log_dict(self.test_metrics, on_step=False, on_epoch=True)
 
         return loss
 

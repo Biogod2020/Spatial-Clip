@@ -2,6 +2,23 @@
 
 _target_: src.models.spatial_clip_module.SpatialClipLitModule
 
+# Pass the instantiated metric objects directly to the module's __init__
+# Hydra will create these objects and pass them in.
+train_metrics:
+  _target_: src.models.components.metrics.ContrastiveMetrics
+  num_classes: ${data.batch_size}
+  prefix: "train/"
+
+val_metrics:
+  _target_: src.models.components.metrics.ContrastiveMetrics
+  num_classes: ${data.batch_size}
+  prefix: "val/"
+
+test_metrics:
+  _target_: src.models.components.metrics.ContrastiveMetrics
+  num_classes: ${data.batch_size}
+  prefix: "test/"
+
 optimizer_cfg: ${optimizer}
 scheduler_cfg: ${scheduler}
 

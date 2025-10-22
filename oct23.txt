@@ -3340,6 +3340,489 @@ def run_sh_command(command: List[str]) -> None:
     if msg:
         pytest.fail(msg=msg)
 
+===== ./logs/train/runs/2025-10-21_08-44-16/csv/version_0/hparams.yaml =====
+callbacks:
+  early_stopping:
+    _target_: lightning.pytorch.callbacks.EarlyStopping
+    check_finite: true
+    check_on_train_epoch_end: null
+    divergence_threshold: null
+    min_delta: 0.0
+    mode: max
+    monitor: val/acc
+    patience: 100
+    stopping_threshold: null
+    strict: true
+    verbose: false
+  model_checkpoint:
+    _target_: lightning.pytorch.callbacks.ModelCheckpoint
+    auto_insert_metric_name: false
+    dirpath: ${paths.output_dir}/checkpoints
+    every_n_epochs: null
+    every_n_train_steps: null
+    filename: epoch_{epoch:03d}
+    mode: max
+    monitor: val/acc
+    save_last: true
+    save_on_train_epoch_end: null
+    save_top_k: 1
+    save_weights_only: false
+    train_time_interval: null
+    verbose: false
+  model_summary:
+    _target_: lightning.pytorch.callbacks.RichModelSummary
+    max_depth: -1
+  rich_progress_bar:
+    _target_: lightning.pytorch.callbacks.RichProgressBar
+ckpt_path: null
+data:
+  _target_: src.data.spatial_datamodule.SpatialClipDataModule
+  batch_size: 128
+  data_dir: ${paths.data_dir}/hest_hugo_6nei_correct_parquet_data
+  k_neighbors: 6
+  num_workers: 8
+  pin_memory: true
+extras:
+  enforce_tags: true
+  ignore_warnings: false
+  print_config: true
+model:
+  _target_: src.models.spatial_clip_module.SpatialClipLitModule
+  loss_fn:
+    _target_: src.models.components.losses.SpatialLoss
+    cap_logit_scale: 40.0
+    float32_logits: true
+    gather_with_grad: true
+    local_loss: true
+    neighbor_alpha_scale: 0.5
+    temp_reg_weight: 0.05
+  net:
+    _target_: src.models.components.spatial_clip_net.SpatialClipNet
+    aug_cfg:
+      _target_: open_clip.AugmentationCfg
+      color_jitter: 0.2
+      ratio:
+      - 0.75
+      - 1.333
+      scale:
+      - 0.9
+      - 1.0
+      use_timm: true
+    model_name: ViT-B-32
+    pretrained: laion2b_s34b_b79k
+  optimizer_cfg: ${optimizer}
+  scheduler_cfg: ${scheduler}
+model/params/non_trainable: 0
+model/params/total: 151277313
+model/params/trainable: 151277313
+optimizer_cfg: !!python/object/apply:functools.partial
+  args:
+  - &id001 !!python/name:torch.optim.adamw.AdamW ''
+  state: !!python/tuple
+  - *id001
+  - !!python/tuple []
+  - betas: &id002 !!python/object:omegaconf.listconfig.ListConfig
+      _content:
+      - !!python/object:omegaconf.nodes.AnyNode
+        _metadata: !!python/object:omegaconf.base.Metadata
+          flags: {}
+          flags_root: false
+          key: 0
+          object_type: null
+          optional: true
+          ref_type: &id003 !!python/name:typing.Any ''
+          resolver_cache: !!python/object/apply:collections.defaultdict
+          - &id004 !!python/name:builtins.dict ''
+        _parent: *id002
+        _val: 0.9
+      - !!python/object:omegaconf.nodes.AnyNode
+        _metadata: !!python/object:omegaconf.base.Metadata
+          flags: {}
+          flags_root: false
+          key: 1
+          object_type: null
+          optional: true
+          ref_type: *id003
+          resolver_cache: !!python/object/apply:collections.defaultdict
+          - *id004
+        _parent: *id002
+        _val: 0.98
+      _metadata: !!python/object:omegaconf.base.ContainerMetadata
+        element_type: *id003
+        flags:
+          allow_objects: true
+        flags_root: false
+        key: null
+        key_type: !!python/name:builtins.int ''
+        object_type: !!python/name:builtins.list ''
+        optional: true
+        ref_type: *id003
+        resolver_cache: !!python/object/apply:collections.defaultdict
+        - *id004
+      _parent: null
+    eps: 1.0e-06
+    lr: 0.001
+    weight_decay: 0.1
+  - null
+scheduler_cfg: !!python/object/apply:functools.partial
+  args:
+  - &id005 !!python/name:transformers.optimization.get_cosine_schedule_with_warmup ''
+  state: !!python/tuple
+  - *id005
+  - !!python/tuple []
+  - num_warmup_steps: 2000
+  - null
+seed: 42
+tags:
+- dev
+task_name: train
+trainer:
+  _target_: lightning.pytorch.Trainer
+  accelerator: auto
+  check_val_every_n_epoch: 1
+  deterministic: false
+  devices: auto
+  fast_dev_run: false
+  gradient_clip_val: 1.0
+  limit_test_batches: 1.0
+  limit_train_batches: 0.01
+  limit_val_batches: 0.1
+  log_every_n_steps: 50
+  max_epochs: 2
+  min_epochs: 1
+  precision: bf16-mixed
+
+===== ./logs/train/runs/2025-10-21_08-44-16/.hydra/config.yaml =====
+task_name: train
+tags:
+- dev
+name: default_run
+train: true
+test: true
+ckpt_path: null
+seed: 42
+optimized_metric: val/loss
+data:
+  _target_: src.data.spatial_datamodule.SpatialClipDataModule
+  data_dir: ${paths.data_dir}/hest_hugo_6nei_correct_parquet_data
+  k_neighbors: 6
+  batch_size: 128
+  num_workers: 8
+  pin_memory: true
+model:
+  _target_: src.models.spatial_clip_module.SpatialClipLitModule
+  optimizer_cfg: ${optimizer}
+  scheduler_cfg: ${scheduler}
+  net:
+    _target_: src.models.components.spatial_clip_net.SpatialClipNet
+    model_name: ViT-B-32
+    pretrained: laion2b_s34b_b79k
+    aug_cfg:
+      _target_: open_clip.AugmentationCfg
+      scale:
+      - 0.9
+      - 1.0
+      ratio:
+      - 0.75
+      - 1.333
+      use_timm: true
+      color_jitter: 0.2
+  loss_fn:
+    _target_: src.models.components.losses.SpatialLoss
+    local_loss: true
+    gather_with_grad: true
+    cap_logit_scale: 40.0
+    temp_reg_weight: 0.05
+    neighbor_alpha_scale: 0.5
+    float32_logits: true
+optimizer:
+  _target_: torch.optim.AdamW
+  _partial_: true
+  lr: 0.001
+  betas:
+  - 0.9
+  - 0.98
+  eps: 1.0e-06
+  weight_decay: 0.1
+scheduler:
+  _target_: transformers.get_cosine_schedule_with_warmup
+  _partial_: true
+  num_warmup_steps: 2000
+callbacks:
+  model_checkpoint:
+    _target_: lightning.pytorch.callbacks.ModelCheckpoint
+    dirpath: ${paths.output_dir}/checkpoints
+    filename: epoch_{epoch:03d}
+    monitor: val/acc
+    verbose: false
+    save_last: true
+    save_top_k: 1
+    mode: max
+    auto_insert_metric_name: false
+    save_weights_only: false
+    every_n_train_steps: null
+    train_time_interval: null
+    every_n_epochs: null
+    save_on_train_epoch_end: null
+  early_stopping:
+    _target_: lightning.pytorch.callbacks.EarlyStopping
+    monitor: val/acc
+    min_delta: 0.0
+    patience: 100
+    verbose: false
+    mode: max
+    strict: true
+    check_finite: true
+    stopping_threshold: null
+    divergence_threshold: null
+    check_on_train_epoch_end: null
+  model_summary:
+    _target_: lightning.pytorch.callbacks.RichModelSummary
+    max_depth: -1
+  rich_progress_bar:
+    _target_: lightning.pytorch.callbacks.RichProgressBar
+logger:
+  csv:
+    _target_: lightning.pytorch.loggers.csv_logs.CSVLogger
+    save_dir: ${paths.output_dir}
+    name: csv/
+    prefix: ''
+trainer:
+  _target_: lightning.pytorch.Trainer
+  min_epochs: 1
+  max_epochs: 2
+  accelerator: auto
+  devices: auto
+  precision: bf16-mixed
+  gradient_clip_val: 1.0
+  check_val_every_n_epoch: 1
+  log_every_n_steps: 50
+  fast_dev_run: false
+  limit_train_batches: 0.01
+  limit_val_batches: 0.1
+  limit_test_batches: 1.0
+  deterministic: false
+paths:
+  root_dir: ${oc.env:PROJECT_ROOT}
+  data_dir: ${paths.root_dir}/data/
+  log_dir: ${paths.root_dir}/logs/
+  output_dir: ${hydra:runtime.output_dir}
+  work_dir: ${hydra:runtime.cwd}
+extras:
+  ignore_warnings: false
+  enforce_tags: true
+  print_config: true
+experiment:
+  tags:
+  - Spatial-CLIP
+  - ViT-B-32
+  - Spatial-Loss
+  - Baseline
+  name: spatial_v1_baseline_run_1
+  trainer:
+    devices: 2
+    max_epochs: 100
+  data:
+    batch_size: 1500
+    num_workers: 16
+  optimizer:
+    lr: 0.0001
+  scheduler:
+    num_warmup_steps: 1000
+
+===== ./logs/train/runs/2025-10-21_08-44-16/.hydra/overrides.yaml =====
+- trainer.max_epochs=2
+- trainer.limit_train_batches=0.01
+- trainer.limit_val_batches=0.1
+- logger=csv
+- experiment=spatial_v2_multi_gpu
+
+===== ./logs/train/runs/2025-10-21_08-44-16/.hydra/hydra.yaml =====
+hydra:
+  run:
+    dir: ${paths.log_dir}/${task_name}/runs/${now:%Y-%m-%d}_${now:%H-%M-%S}
+  sweep:
+    dir: ${paths.log_dir}/${task_name}/multiruns/${now:%Y-%m-%d}_${now:%H-%M-%S}
+    subdir: ${hydra.job.num}
+  launcher:
+    _target_: hydra._internal.core_plugins.basic_launcher.BasicLauncher
+  sweeper:
+    _target_: hydra._internal.core_plugins.basic_sweeper.BasicSweeper
+    max_batch_size: null
+    params: null
+  help:
+    app_name: ${hydra.job.name}
+    header: '${hydra.help.app_name} is powered by Hydra.
+
+      '
+    footer: 'Powered by Hydra (https://hydra.cc)
+
+      Use --hydra-help to view Hydra specific help
+
+      '
+    template: '${hydra.help.header}
+
+      == Configuration groups ==
+
+      Compose your configuration from those groups (group=option)
+
+
+      $APP_CONFIG_GROUPS
+
+
+      == Config ==
+
+      Override anything in the config (foo.bar=value)
+
+
+      $CONFIG
+
+
+      ${hydra.help.footer}
+
+      '
+  hydra_help:
+    template: 'Hydra (${hydra.runtime.version})
+
+      See https://hydra.cc for more info.
+
+
+      == Flags ==
+
+      $FLAGS_HELP
+
+
+      == Configuration groups ==
+
+      Compose your configuration from those groups (For example, append hydra/job_logging=disabled
+      to command line)
+
+
+      $HYDRA_CONFIG_GROUPS
+
+
+      Use ''--cfg hydra'' to Show the Hydra config.
+
+      '
+    hydra_help: ???
+  hydra_logging:
+    version: 1
+    formatters:
+      colorlog:
+        (): colorlog.ColoredFormatter
+        format: '[%(cyan)s%(asctime)s%(reset)s][%(purple)sHYDRA%(reset)s] %(message)s'
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: colorlog
+        stream: ext://sys.stdout
+    root:
+      level: INFO
+      handlers:
+      - console
+    disable_existing_loggers: false
+  job_logging:
+    version: 1
+    formatters:
+      simple:
+        format: '[%(asctime)s][%(name)s][%(levelname)s] - %(message)s'
+      colorlog:
+        (): colorlog.ColoredFormatter
+        format: '[%(cyan)s%(asctime)s%(reset)s][%(blue)s%(name)s%(reset)s][%(log_color)s%(levelname)s%(reset)s]
+          - %(message)s'
+        log_colors:
+          DEBUG: purple
+          INFO: green
+          WARNING: yellow
+          ERROR: red
+          CRITICAL: red
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: colorlog
+        stream: ext://sys.stdout
+      file:
+        class: logging.FileHandler
+        formatter: simple
+        filename: ${hydra.runtime.output_dir}/${task_name}.log
+    root:
+      level: INFO
+      handlers:
+      - console
+      - file
+    disable_existing_loggers: false
+  env: {}
+  mode: RUN
+  searchpath: []
+  callbacks: {}
+  output_subdir: .hydra
+  overrides:
+    hydra:
+    - hydra.mode=RUN
+    task:
+    - trainer.max_epochs=2
+    - trainer.limit_train_batches=0.01
+    - trainer.limit_val_batches=0.1
+    - logger=csv
+    - experiment=spatial_v2_multi_gpu
+  job:
+    name: train
+    chdir: null
+    override_dirname: experiment=spatial_v2_multi_gpu,logger=csv,trainer.limit_train_batches=0.01,trainer.limit_val_batches=0.1,trainer.max_epochs=2
+    id: ???
+    num: ???
+    config_name: train.yaml
+    env_set: {}
+    env_copy: []
+    config:
+      override_dirname:
+        kv_sep: '='
+        item_sep: ','
+        exclude_keys: []
+  runtime:
+    version: 1.3.2
+    version_base: '1.3'
+    cwd: /cpfs01/projects-HDD/cfff-afe2df89e32e_HDD/jjh_19301050235/git_repo/Spatial-Clip
+    config_sources:
+    - path: hydra.conf
+      schema: pkg
+      provider: hydra
+    - path: /cpfs01/projects-HDD/cfff-afe2df89e32e_HDD/jjh_19301050235/git_repo/Spatial-Clip/configs
+      schema: file
+      provider: main
+    - path: hydra_plugins.hydra_colorlog.conf
+      schema: pkg
+      provider: hydra-colorlog
+    - path: ''
+      schema: structured
+      provider: schema
+    output_dir: /cpfs01/projects-HDD/cfff-afe2df89e32e_HDD/jjh_19301050235/git_repo/Spatial-Clip/logs/train/runs/2025-10-21_08-44-16
+    choices:
+      debug: null
+      local: default
+      hparams_search: null
+      experiment: spatial_v2_multi_gpu
+      hydra: default
+      extras: default
+      paths: default
+      trainer: default
+      logger: csv
+      callbacks: default
+      scheduler: cosine
+      optimizer: adamw
+      model: spatial_clip
+      data: spatial
+      hydra/env: default
+      hydra/callbacks: null
+      hydra/job_logging: colorlog
+      hydra/hydra_logging: colorlog
+      hydra/hydra_help: default
+      hydra/help: default
+      hydra/sweeper: basic
+      hydra/launcher: basic
+      hydra/output: default
+  verbose: false
+
 ===== ./logs/train/runs/2025-10-17_17-03-39/.hydra/config.yaml =====
 task_name: train
 tags:
@@ -21612,6 +22095,39 @@ scheduler:
 # logger:
 #   aim:
 #     experiment: "Spatial-CLIP-High-Batch-Size"
+===== ./configs/experiment/spatial_v2_multi_gpu.yaml =====
+# configs/experiment/spatial_v2.yaml
+# @package _global_
+
+# CodeGuardian: 实验配置文件的唯一职责是“覆盖”默认值。
+# 它不包含自己的 `defaults` 列表。
+# 结构清晰，一目了然地展示了本次实验与默认配置的所有不同之处。
+
+# --- 实验元数据 ---
+tags: ["Spatial-CLIP", "ViT-B-32", "Spatial-Loss", "Baseline"]
+name: "spatial_v1_baseline_run_1" # Aim/WandB 中的运行名称
+
+# --- 针对本次实验的参数覆盖 ---
+# 直接指定要覆盖的组件及其参数
+
+trainer:
+  devices: 2
+  max_epochs: 100
+
+data:
+  batch_size: 1500
+  num_workers: 16
+
+optimizer:
+  lr: 1e-4
+
+scheduler:
+  num_warmup_steps: 1000
+
+# 如果需要覆盖 logger 的特定参数，也可以在这里进行
+# logger:
+#   aim:
+#     experiment: "Spatial-CLIP-High-Batch-Size"
 ===== ./configs/logger/csv.yaml =====
 # csv logger built in lightning
 
@@ -21869,6 +22385,9 @@ log_every_n_steps: 50 # 增加日志记录频率
 # CodeGuardian: 关键修复！在此处将 fast_dev_run 定义为 trainer 的一个合法参数。
 # 默认值为 false，允许从命令行通过 trainer.fast_dev_run=True 进行“覆盖”而不是“添加”。
 fast_dev_run: false
+limit_train_batches: 1.0  # Use 1.0 for 100% of batches
+limit_val_batches: 1.0
+limit_test_batches: 1.0
 
 # for full reproducibility
 deterministic: false

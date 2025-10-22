@@ -152,3 +152,5 @@ logs/
 
 # Aim logging
 .aim
+
+old_merge_files/
