@@ -4,6 +4,7 @@ from typing import Any, Dict
 
 import hydra
 import torch
+from torchmetrics import MetricCollection
 from lightning import LightningModule
 from omegaconf import DictConfig
 
@@ -22,11 +23,18 @@ class SpatialClipLitModule(LightningModule):
         loss_fn: SpatialLoss,
         optimizer_cfg: DictConfig,  # CodeGuardian: 这里接收的是一个 partial 对象
         scheduler_cfg: DictConfig,  # CodeGuardian: 这里接收的是一个 partial 对象
+        train_metrics: MetricCollection,
+        val_metrics: MetricCollection,
+        test_metrics: MetricCollection,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["net", "loss_fn"])
         self.net = net
         self.loss_fn = loss_fn
+        # The module receives fully instantiated metric objects
+        self.train_metrics = train_metrics
+        self.val_metrics = val_metrics
+        self.test_metrics = test_metrics
 
     def forward(self, images: torch.Tensor, texts: torch.Tensor) -> Dict[str, torch.Tensor]:
         return self.net(images, texts)
