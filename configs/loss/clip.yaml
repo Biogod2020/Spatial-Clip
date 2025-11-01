@@ -1,0 +1,8 @@
+# configs/model/loss/clip.yaml
+_target_: src.models.components.losses.ClipLoss
+
+# --- CodeGuardian: These are the knobs for your standard ClipLoss experiment ---
+# HOW to compute the loss
+local_loss: true
+gather_with_grad: true
+cache_labels: true # Standard CLIP loss can cache labels

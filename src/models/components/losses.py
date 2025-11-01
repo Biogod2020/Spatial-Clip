@@ -1,22 +1,22 @@
 # src/models/components/losses.py
-
 from typing import Dict, Optional, Union
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributed as dist
-from open_clip.loss import gather_features
+from open_clip.loss import gather_features, ClipLoss as OpenClipLoss
+
 
 class SpatialLoss(nn.Module):
     """
-    空间多正样本损失函数模块。
-    - CodeGuardian: 此模块只关心 "如何计算损失" (HOW)，完全独立于训练循环。
+    CodeGuardian: This is the 'Thick Implementation' for your spatial loss.
+    It is a pure nn.Module, containing only the logic for WHAT it does.
     """
     def __init__(
         self,
         local_loss: bool = False,
         gather_with_grad: bool = False,
-        cache_labels: bool = False, # 在软标签场景下通常为 False
         rank: int = 0,
         world_size: int = 1,
         use_horovod: bool = False,
@@ -26,7 +26,7 @@ class SpatialLoss(nn.Module):
         neighbor_alpha_scale: float = 1.0,
     ):
         super().__init__()
-        if dist.is_initialized():
+        if dist.is_available() and dist.is_initialized():
             self.rank = dist.get_rank()
             self.world_size = dist.get_world_size()
         else:
@@ -51,8 +51,8 @@ class SpatialLoss(nn.Module):
         neighbor_tile_ids: torch.Tensor,
         neighbor_alphas: torch.Tensor,
         logit_bias: Optional[torch.Tensor] = None,
-        output_dict: bool = False,
-    ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
+        output_dict: bool = True, # For consistency with LightningModule logging
+    ) -> Dict[str, torch.Tensor]:
         device = image_features.device
 
         if self.world_size > 1:
@@ -121,4 +121,21 @@ class SpatialLoss(nn.Module):
             gap = 0.5 * ((Ez_p_i - Ez_q_i) + (Ez_p_t - Ez_q_t))
             total_loss += self.temp_reg_weight * (gap ** 2)
 
-        return {"contrastive_loss": total_loss} if output_dict else total_loss
+        return {"contrastive_loss": total_loss}
+
+class ClipLoss(OpenClipLoss):
+    """
+    CodeGuardian: A simple wrapper around open_clip.ClipLoss to standardize the output format.
+    It ensures that no matter which loss is used, the output is a dictionary.
+    """
+    def forward(
+        self,
+        image_features,
+        text_features,
+        logit_scale,
+        logit_bias=None,
+        output_dict=True,
+        **kwargs, # Accept extra arguments from SpatialLoss and ignore them
+    ) -> Dict[str, torch.Tensor]:
+        loss = super().forward(image_features, text_features, logit_scale, logit_bias)
+        return {"contrastive_loss": loss}

@@ -6,6 +6,7 @@ defaults:
   - _self_
   - data: spatial          # 默认使用 spatial 数据
   - model: spatial_clip    # 默认使用 spatial_clip 模型
+  - loss: spatial          # 默认使用 spatial loss 函数
   - optimizer: adamw       # 默认使用 adamw 优化器
   - scheduler: cosine      # 默认使用 cosine 调度器
   - callbacks: default     # 默认使用 default 回调

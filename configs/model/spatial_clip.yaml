@@ -1,10 +1,27 @@
 # configs/model/spatial_clip.yaml
 
+# CodeGuardian: CLEANED. No more internal 'defaults' list.
+# The model config now only defines the model-specific components.
 _target_: src.models.spatial_clip_module.SpatialClipLitModule
 
-# Pass the instantiated metric objects directly to the module's __init__
-# Hydra will create these objects and pass them in.
-# Metrics no longer require num_classes, making them robust.
+# --- Components (THE "WHAT" and "WITH") ---
+net:
+  _target_: src.models.components.spatial_clip_net.SpatialClipNet
+  model_name: ViT-B-32
+  pretrained: laion2b_s34b_b79k
+  aug_cfg:
+    _target_: open_clip.AugmentationCfg
+    scale: [0.9, 1.0]
+    ratio: [0.75, 1.333]
+    use_timm: true
+    color_jitter: 0.2
+
+# CodeGuardian: CORRECTED. This now references the top-level `loss` config group.
+# Hydra will instantiate the object defined in `configs/loss/*.yaml` and pass it
+# to the 'loss_fn' argument of the LightningModule.
+loss_fn: ${loss}
+
+# --- Metrics ---
 train_metrics:
   _target_: src.models.components.metrics.ContrastiveMetrics
   prefix: "train/"
@@ -17,28 +34,6 @@ test_metrics:
   _target_: src.models.components.metrics.ContrastiveMetrics
   prefix: "test/"
 
+# --- Hyperparameters (THE "HOW") ---
 optimizer_cfg: ${optimizer}
 scheduler_cfg: ${scheduler}
-
-# CodeGuardian: 关键修复！
-# 这些键名现在直接对应 LightningModule 的 __init__ 参数名。
-# Hydra 会自动实例化这些嵌套的配置块，并将生成的对象传递给 __init__。
-net:
-  _target_: src.models.components.spatial_clip_net.SpatialClipNet
-  model_name: ViT-B-32
-  pretrained: laion2b_s34b_b79k
-  aug_cfg:
-    _target_: open_clip.AugmentationCfg
-    scale: [0.9, 1.0]
-    ratio: [0.75, 1.333]
-    use_timm: true
-    color_jitter: 0.2
-
-loss_fn:
-  _target_: src.models.components.losses.SpatialLoss
-  local_loss: true
-  gather_with_grad: true
-  cap_logit_scale: 40.0
-  temp_reg_weight: 0.05
-  neighbor_alpha_scale: 0.5
-  float32_logits: true

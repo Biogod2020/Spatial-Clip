@@ -1,38 +1,37 @@
-# 文件路径: src/models/spatial_clip_module.py
+# src/models/spatial_clip_module.py
 
 from typing import Any, Dict
 
-import hydra
 import torch
-from torchmetrics import MetricCollection
-from .components.metrics import ContrastiveMetrics
 from lightning import LightningModule
 from omegaconf import DictConfig
+from torch.nn import Module as LossFunction
+from torchmetrics import MetricCollection
 
 from .components.spatial_clip_net import SpatialClipNet
-from .components.losses import SpatialLoss
+
 
 class SpatialClipLitModule(LightningModule):
     """
-    一个“薄编排层” LightningModule。
-    CodeGuardian: __init__ 直接接收实例化的对象，而不是配置。
-    这与 Hydra 的默认递归实例化行为完全匹配。
+    CodeGuardian: A compliant "Thin Orchestrator" LightningModule.
+    Its `__init__` signature directly maps to the `spatial_clip.yaml` config structure.
+    It is completely unaware of the specific loss function's implementation.
     """
     def __init__(
         self,
         net: SpatialClipNet,
-        loss_fn: SpatialLoss,
-        optimizer_cfg: DictConfig,  # CodeGuardian: 这里接收的是一个 partial 对象
-        scheduler_cfg: DictConfig,  # CodeGuardian: 这里接收的是一个 partial 对象
-        train_metrics: ContrastiveMetrics,
-        val_metrics: ContrastiveMetrics,
-        test_metrics: ContrastiveMetrics,
+        loss_fn: LossFunction, # Receives an instantiated nn.Module
+        optimizer_cfg: DictConfig,
+        scheduler_cfg: DictConfig,
+        train_metrics: MetricCollection,
+        val_metrics: MetricCollection,
+        test_metrics: MetricCollection,
     ):
         super().__init__()
-        self.save_hyperparameters(ignore=["net", "loss_fn"])
+        # This saves all hyperparameters except the complex objects (net, loss_fn).
+        self.save_hyperparameters(logger=True, ignore=["net", "loss_fn"])
         self.net = net
         self.loss_fn = loss_fn
-        # The module receives fully instantiated metric objects
         self.train_metrics = train_metrics
         self.val_metrics = val_metrics
         self.test_metrics = test_metrics
@@ -40,92 +39,64 @@ class SpatialClipLitModule(LightningModule):
     def forward(self, images: torch.Tensor, texts: torch.Tensor) -> Dict[str, torch.Tensor]:
         return self.net(images, texts)
 
-    def _step(self, batch: Dict[str, Any], batch_idx: int, step_name: str) -> torch.Tensor:
+    def model_step(self, batch: Dict[str, Any]) -> Dict[str, torch.Tensor]:
+        # Centralized forward pass and loss calculation
         features = self.forward(batch["images"], batch["texts"])
+        loss_input = {**features, **batch} # Combine features and batch data for the loss function
+        loss_dict = self.loss_fn(**loss_input)
         
-        loss_input = {
-            "image_features": features["image_features"],
-            "text_features": features["text_features"],
-            "logit_scale": features["logit_scale"],
-            "logit_bias": features.get("logit_bias"),
-            "image_tile_ids": batch["image_tile_ids"],
-            "text_tile_ids": batch["text_tile_ids"],
-            "neighbor_tile_ids": batch["neighbor_tile_ids"],
-            "neighbor_alphas": batch["neighbor_alphas"],
-        }
+        # Prepare outputs for metrics and logging
+        output = {"loss": loss_dict["contrastive_loss"]}
         
-        loss_dict = self.loss_fn(**loss_input, output_dict=True)
-        loss = loss_dict["contrastive_loss"]
-        
-        
-        # --- Generic Metric Update ---
+        # For metric calculation
         logits_per_image = features["image_features"] @ features["text_features"].T * features["logit_scale"]
-        ground_truth = torch.arange(len(logits_per_image), device=self.device)
+        output["logits"] = logits_per_image
         
-        # The module just calls update(), it doesn't know what's inside
-        if step_name == "train":
-            self.train_metrics.update(logits_per_image, ground_truth)
-        elif step_name == "val":
-            self.val_metrics.update(logits_per_image, ground_truth)
-        else: # test
-            self.test_metrics.update(logits_per_image, ground_truth)
-            
-
-        # --- Logging ---
-        # In _step method
-        self.log(f"{step_name}/loss", loss, on_step=(step_name=="train"), on_epoch=True, prog_bar=True, sync_dist=True)
-        if step_name == "train":
-            self.log_dict(self.train_metrics, on_step=False, on_epoch=True, sync_dist=True)
-        elif step_name == "val":
-            self.log_dict(self.val_metrics, on_step=False, on_epoch=True, sync_dist=True)
-        else:
-            self.log_dict(self.test_metrics, on_step=False, on_epoch=True, sync_dist=True)
-
-        return loss
+        return output
 
     def training_step(self, batch: Dict[str, Any], batch_idx: int) -> torch.Tensor:
-        return self._step(batch, batch_idx, "train")
+        output = self.model_step(batch)
+        self.log("train/loss", output["loss"], on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.train_metrics(output["logits"], torch.arange(len(output["logits"]), device=self.device))
+        self.log_dict(self.train_metrics, on_step=False, on_epoch=True, sync_dist=True)
+        return output["loss"]
 
     def validation_step(self, batch: Dict[str, Any], batch_idx: int) -> None:
-        self._step(batch, batch_idx, "val")
+        output = self.model_step(batch)
+        self.log("val/loss", output["loss"], on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.val_metrics(output["logits"], torch.arange(len(output["logits"]), device=self.device))
+        self.log_dict(self.val_metrics, on_step=False, on_epoch=True, sync_dist=True)
 
     def test_step(self, batch: Dict[str, Any], batch_idx: int) -> None:
-        self._step(batch, batch_idx, "test")
+        output = self.model_step(batch)
+        self.log("test/loss", output["loss"], on_step=False, on_epoch=True, sync_dist=True)
+        self.test_metrics(output["logits"], torch.arange(len(output["logits"]), device=self.device))
+        self.log_dict(self.test_metrics, on_step=False, on_epoch=True, sync_dist=True)
 
     def configure_optimizers(self) -> Dict[str, Any]:
-        """
-        CodeGuardian's Architectural Fix:
-        `self.hparams.optimizer_cfg` 和 `self.hparams.scheduler_cfg` 已经是 functools.partial 对象。
-        我们不再使用 `hydra.utils.instantiate`，而是直接调用这些 partial 对象，并传入运行时参数。
-        """
-        # 调用 optimizer partial 对象，传入 `params`
+        """Configures optimizers and learning-rate schedulers."""
         optimizer = self.hparams.optimizer_cfg(params=self.parameters())
         
         if self.trainer is None:
             return {"optimizer": optimizer}
 
-        # 动态计算总步数
+        # Dynamically calculate total steps for scheduler
         if self.trainer.max_steps == -1:
-            if self.trainer.max_epochs is None:
-                total_steps = 1_000_000 
-                self.print(f"Warning: Could not estimate total steps. Using a default of {total_steps}.")
-            else:
-                total_steps = self.trainer.estimated_stepping_batches
+            total_steps = self.trainer.estimated_stepping_batches if self.trainer.max_epochs is not None else 1_000_000
         else:
             total_steps = self.trainer.max_steps
         
         if total_steps == float('inf') or total_steps == -1:
             total_steps = 1_000_000 
-            self.print(f"Warning: Could not estimate total steps for scheduler. Using a default value of {total_steps}.")
+            self.print(f"Warning: Could not estimate total steps. Using default: {total_steps}.")
 
-        # 调用 scheduler partial 对象，传入 `optimizer` 和 `num_training_steps`
         scheduler = self.hparams.scheduler_cfg(optimizer=optimizer, num_training_steps=int(total_steps))
 
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
-                "monitor": "val/loss",
+                "monitor": self.hparams.get("optimized_metric", "val/loss"), # Use optimized metric from main config
                 "interval": "step",
                 "frequency": 1,
             },
