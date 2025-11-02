@@ -125,17 +125,17 @@ class SpatialLoss(nn.Module):
 
 class ClipLoss(OpenClipLoss):
     """
-    CodeGuardian: A simple wrapper around open_clip.ClipLoss to standardize the output format.
-    It ensures that no matter which loss is used, the output is a dictionary.
+    CodeGuardian: 一个简单的包装器，现在拥有一个干净、明确的接口。
+    它不再需要 **kwargs。
     """
     def forward(
         self,
-        image_features,
-        text_features,
-        logit_scale,
-        logit_bias=None,
-        output_dict=True,
-        **kwargs, # Accept extra arguments from SpatialLoss and ignore them
+        image_features: torch.Tensor,
+        text_features: torch.Tensor,
+        logit_scale: torch.Tensor,
+        logit_bias: Optional[torch.Tensor] = None,
+        # **kwargs,  <-- 移除这一行
     ) -> Dict[str, torch.Tensor]:
-        loss = super().forward(image_features, text_features, logit_scale, logit_bias)
+        # 确保 output_dict=False 以获取原始损失张量
+        loss = super().forward(image_features, text_features, logit_scale, logit_bias, output_dict=False)
         return {"contrastive_loss": loss}

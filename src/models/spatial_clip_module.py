@@ -1,5 +1,5 @@
 # src/models/spatial_clip_module.py
-
+import inspect  # <-- 1. 导入 inspect 模块
 from typing import Any, Dict
 
 import torch
@@ -12,15 +12,10 @@ from .components.spatial_clip_net import SpatialClipNet
 
 
 class SpatialClipLitModule(LightningModule):
-    """
-    CodeGuardian: A compliant "Thin Orchestrator" LightningModule.
-    Its `__init__` signature directly maps to the `spatial_clip.yaml` config structure.
-    It is completely unaware of the specific loss function's implementation.
-    """
     def __init__(
         self,
         net: SpatialClipNet,
-        loss_fn: LossFunction, # Receives an instantiated nn.Module
+        loss_fn: LossFunction,
         optimizer_cfg: DictConfig,
         scheduler_cfg: DictConfig,
         train_metrics: MetricCollection,
@@ -28,7 +23,6 @@ class SpatialClipLitModule(LightningModule):
         test_metrics: MetricCollection,
     ):
         super().__init__()
-        # This saves all hyperparameters except the complex objects (net, loss_fn).
         self.save_hyperparameters(logger=True, ignore=["net", "loss_fn"])
         self.net = net
         self.loss_fn = loss_fn
@@ -36,24 +30,36 @@ class SpatialClipLitModule(LightningModule):
         self.val_metrics = val_metrics
         self.test_metrics = test_metrics
 
+        # 2. ✅ CodeGuardian: 在初始化时，一次性检查并缓存损失函数需要的参数名集合。
+        self._loss_fn_arg_names = set(inspect.signature(self.loss_fn.forward).parameters.keys())
+        # 这将得到一个类似 {'image_features', 'text_features', 'logit_scale', ...} 的集合
+
     def forward(self, images: torch.Tensor, texts: torch.Tensor) -> Dict[str, torch.Tensor]:
         return self.net(images, texts)
 
     def model_step(self, batch: Dict[str, Any]) -> Dict[str, torch.Tensor]:
-        # Centralized forward pass and loss calculation
         features = self.forward(batch["images"], batch["texts"])
-        loss_input = {**features, **batch} # Combine features and batch data for the loss function
+
+        # 3. ✅ CodeGuardian: 实现“智能分发器”
+        # 3a. 准备一个包含所有可用数据的“大字典” (The available data pool)
+        available_data = {**features, **batch}
+
+        # 3b. 根据之前缓存的参数名集合，智能筛选出当前 loss_fn 真正需要的参数。
+        loss_input = {
+            key: value for key, value in available_data.items() 
+            if key in self._loss_fn_arg_names
+        }
+        
+        # 3c. 安全地调用损失函数
         loss_dict = self.loss_fn(**loss_input)
         
-        # Prepare outputs for metrics and logging
+        # ... 后续逻辑保持不变 ...
         output = {"loss": loss_dict["contrastive_loss"]}
-        
-        # For metric calculation
         logits_per_image = features["image_features"] @ features["text_features"].T * features["logit_scale"]
         output["logits"] = logits_per_image
-        
         return output
 
+    # ... training_step, validation_step, test_step, 和 configure_optimizers 保持不变 ...
     def training_step(self, batch: Dict[str, Any], batch_idx: int) -> torch.Tensor:
         output = self.model_step(batch)
         self.log("train/loss", output["loss"], on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
@@ -72,31 +78,24 @@ class SpatialClipLitModule(LightningModule):
         self.log("test/loss", output["loss"], on_step=False, on_epoch=True, sync_dist=True)
         self.test_metrics(output["logits"], torch.arange(len(output["logits"]), device=self.device))
         self.log_dict(self.test_metrics, on_step=False, on_epoch=True, sync_dist=True)
-
-    def configure_optimizers(self) -> Dict[str, Any]:
-        """Configures optimizers and learning-rate schedulers."""
-        optimizer = self.hparams.optimizer_cfg(params=self.parameters())
         
+    def configure_optimizers(self) -> Dict[str, Any]:
+        optimizer = self.hparams.optimizer_cfg(params=self.parameters())
         if self.trainer is None:
             return {"optimizer": optimizer}
-
-        # Dynamically calculate total steps for scheduler
         if self.trainer.max_steps == -1:
             total_steps = self.trainer.estimated_stepping_batches if self.trainer.max_epochs is not None else 1_000_000
         else:
             total_steps = self.trainer.max_steps
-        
         if total_steps == float('inf') or total_steps == -1:
             total_steps = 1_000_000 
             self.print(f"Warning: Could not estimate total steps. Using default: {total_steps}.")
-
         scheduler = self.hparams.scheduler_cfg(optimizer=optimizer, num_training_steps=int(total_steps))
-
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
-                "monitor": self.hparams.get("optimized_metric", "val/loss"), # Use optimized metric from main config
+                "monitor": self.hparams.get("optimized_metric", "val/loss"),
                 "interval": "step",
                 "frequency": 1,
             },

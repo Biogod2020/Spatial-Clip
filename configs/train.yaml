@@ -21,7 +21,7 @@ defaults:
   - experiment: null
   
   # 用于超参数搜索
-  - hparams_search: null
+  - optional hparams_search: null
   
   # 用于本地机器特定设置（此文件不在版本控制中）
   - optional local: default

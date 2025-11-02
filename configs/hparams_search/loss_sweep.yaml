@@ -1,0 +1,14 @@
+# @package _global_
+
+defaults:
+  - override hydra/sweeper: basic   # 正确语法：不带 @ 别名
+
+hydra:
+  sweeper:
+    params:
+      loss: spatial,clip
+      trainer.max_epochs: 5
+      trainer.limit_train_batches: 1
+      trainer.limit_val_batches: 1
+      logger: aim
+      logger.aim.experiment: Loss_Function_Sweep
