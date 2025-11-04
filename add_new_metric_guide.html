@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SOTA Guide: Adding New Metrics</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Fira+Code&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #f8f9fa;
+            --primary-text: #212529;
+            --secondary-text: #495057;
+            --card-bg: #ffffff;
+            --border-color: #dee2e6;
+            --primary-color: #4263eb;
+            --code-bg: #2c3e50;
+            --code-text: #ecf0f1;
+            --note-bg: #e7f5ff;
+            --note-border: #339af0;
+            --success-bg: #e6fcf5;
+            --success-border: #20c997;
+        }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.7;
+            color: var(--primary-text);
+            background-color: var(--bg-color);
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 40px;
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.08);
+        }
+        h1, h2, h3 {
+            color: var(--primary-text);
+            font-weight: 700;
+            margin-top: 1.5em;
+            margin-bottom: 0.8em;
+        }
+        h1 {
+            font-size: 2.8em;
+            text-align: center;
+            margin-bottom: 0.5em;
+            background: linear-gradient(45deg, var(--primary-color), #a61e4d);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        h2 {
+            font-size: 2em;
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 10px;
+        }
+        h3 {
+            font-size: 1.5em;
+        }
+        code {
+            font-family: 'Fira Code', "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+            background-color: rgba(0,0,0,0.05);
+            padding: 3px 6px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        pre {
+            background-color: var(--code-bg);
+            color: var(--code-text);
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        pre code {
+            background-color: transparent;
+            padding: 0;
+            font-size: 0.95em;
+            line-height: 1.5;
+        }
+        .info-box {
+            padding: 20px;
+            margin: 25px 0;
+            border-radius: 8px;
+            display: flex;
+            align-items: flex-start;
+            gap: 15px;
+        }
+        .info-box svg {
+            flex-shrink: 0;
+            margin-top: 5px;
+        }
+        .note {
+            background-color: var(--note-bg);
+            border-left: 5px solid var(--note-border);
+        }
+        .success {
+            background-color: var(--success-bg);
+            border-left: 5px solid var(--success-border);
+        }
+        .file-path {
+            font-style: italic;
+            color: var(--secondary-text);
+            display: block;
+            margin-bottom: -10px;
+            font-size: 0.9em;
+        }
+        .step {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            font-size: 1.5em;
+            font-weight: 700;
+            color: var(--primary-color);
+        }
+        .step-circle {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: var(--primary-color);
+            color: white;
+            display: grid;
+            place-items: center;
+            font-size: 0.8em;
+        }
+        ul {
+            padding-left: 20px;
+        }
+        li {
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>SOTA Guide to Adding Metrics</h1>
+        <p>A developer-friendly guide to integrating new metrics into your PyTorch Lightning project with elegance and modularity.</p>
+
+        <h2>The Big Picture: How Metrics Flow</h2>
+        <p>Our project uses a clean, decoupled architecture. Understanding this flow is key:</p>
+        <ul>
+            <li><strong>YAML Configs:</strong> Define *what* metrics to use.</li>
+            <li><strong>Hydra:</strong> Reads configs and *instantiates* metric objects.</li>
+            <li><strong>MetricCollection:</strong> Bundles individual metrics into a single, callable object.</li>
+            <li><strong>LightningModule:</strong> Receives the collection and uses it, without knowing the details.</li>
+            <li><strong>Logger:</strong> Automatically receives and logs the results.</li>
+        </ul>
+        <div class="info-box note">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            <div><strong>Key Principle:</strong> The training logic in <code>LightningModule</code> is completely agnostic to *which* metrics are being run. This makes adding new ones a breeze—no changes to the core training code needed!</div>
+        </div>
+
+        <h2>Your Step-by-Step Mission</h2>
+
+        <div class="step"><div class="step-circle">1</div><h3>Implement the Metric Class</h3></div>
+        <p>Your custom metric should be a class inheriting from <code>torchmetrics.Metric</code>. This gives you superpowers like automatic distributed training support.</p>
+        <p>Let's build a <strong>Mean Reciprocal Rank (MRR)</strong> metric.</p>
+        <p class="file-path">File to edit: <code>src/models/components/metrics.py</code></p>
+        <pre><code># src/models/components/metrics.py
+
+# ... existing code for RecallAtK ...
+
+class MeanReciprocalRank(Metric):
+    """
+    Mean Reciprocal Rank (MRR) for in-batch retrieval.
+    """
+    is_differentiable = False
+    higher_is_better = True
+    full_state_update = False
+
+    def __init__(self):
+        super().__init__()
+        # `add_state` registers buffers to track the metric's state.
+        # `dist_reduce_fx="sum"` ensures correct aggregation in distributed settings.
+        self.add_state("reciprocal_sum", default=torch.tensor(0.0), dist_reduce_fx="sum")
+        self.add_state("count", default=torch.tensor(0), dist_reduce_fx="sum")
+
+    def update(self, logits: torch.Tensor, target: torch.Tensor) -> None:
+        """Called on each batch to update the metric's state."""
+        # Get descending sort indices for each row of logits
+        preds_desc = torch.argsort(logits, dim=1, descending=True)
+        
+        # Find the rank of the target for each item in the batch
+        matches = (preds_desc == target.view(-1, 1))
+        ranks = torch.nonzero(matches)[:, 1].float() + 1.0
+        
+        # Update state
+        self.reciprocal_sum += torch.sum(1.0 / ranks)
+        self.count += target.numel()
+
+    def compute(self) -> torch.Tensor:
+        """Computes the final metric value from the state."""
+        return (self.reciprocal_sum / self.count).float()
+
+# ... existing ContrastiveMetrics class ...
+</code></pre>
+
+        <div class="step"><div class="step-circle">2</div><h3>Register in a Metric Collection</h3></div>
+        <p>The simplest way to get your metric into the training loop is by adding it to the existing <code>ContrastiveMetrics</code> collection.</p>
+        <p class="file-path">File to edit: <code>src/models/components/metrics.py</code></p>
+        <pre><code># src/models/components/metrics.py
+
+class ContrastiveMetrics(torchmetrics.MetricCollection):
+    """A collection of robust metrics for contrastive learning tasks."""
+    def __init__(self, prefix: str):
+        super().__init__(
+            {
+                "R@1": RecallAtK(k=1),
+                "R@5": RecallAtK(k=5),
+                "R@10": RecallAtK(k=10),
+                "MRR": MeanReciprocalRank(),  # &lt;-- Your new metric is now active!
+            },
+            prefix=prefix,
+        )
+</code></pre>
+
+        <div class="step"><div class="step-circle">3</div><h3>Write a Rock-Solid Unit Test</h3></div>
+        <p>Good code is tested code. A unit test ensures your metric is correct now and in the future.</p>
+        <div class="info-box success">
+             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            <div><strong>Best Practice:</strong> Create a small, predictable input tensor where you can calculate the expected output by hand. This makes your test clear and reliable.</div>
+        </div>
+        <p class="file-path">New file: <code>tests/test_custom_metrics.py</code></p>
+        <pre><code># tests/test_custom_metrics.py
+import torch
+import pytest
+from src.models.components.metrics import MeanReciprocalRank, ContrastiveMetrics
+
+def test_mrr_metric_perfect_score():
+    """Test MRR with perfect predictions (all rank 1)."""
+    mrr = MeanReciprocalRank()
+    logits = torch.tensor([[10., 1., 0.], [0., 10., 1.], [1., 0., 10.]])
+    targets = torch.tensor([0, 1, 2])
+    mrr.update(logits, targets)
+    assert torch.isclose(mrr.compute(), torch.tensor(1.0))
+
+def test_mrr_metric_mixed_ranks():
+    """Test MRR with a mix of ranks."""
+    mrr = MeanReciprocalRank()
+    # Ranks: 1, 3, 2
+    logits = torch.tensor([[10., 1., 0.], [1., 0., 10.], [1., 10., 0.]])
+    targets = torch.tensor([0, 1, 2])
+    mrr.update(logits, targets)
+    
+    # Expected MRR = (1/1 + 1/3 + 1/2) / 3 = 11/18
+    expected = (1.0/1.0 + 1.0/3.0 + 1.0/2.0) / 3.0
+    assert torch.isclose(mrr.compute(), torch.tensor(expected))
+
+def test_full_metric_collection():
+    """Test that the full metric collection computes all metrics."""
+    metrics = ContrastiveMetrics(prefix="test/")
+    logits = torch.eye(5) * 10  # Perfect predictions for a batch of 5
+    targets = torch.arange(5)
+
+    metrics.update(logits, targets)
+    results = metrics.compute()
+
+    assert "test/MRR" in results
+    assert "test/R@1" in results
+    assert torch.isclose(results["test/MRR"], torch.tensor(1.0))
+    assert torch.isclose(results["test/R@1"], torch.tensor(1.0))
+</code></pre>
+        <p>Run your new test from the terminal:</p>
+        <pre><code>pytest tests/test_custom_metrics.py</code></pre>
+
+        <h2>Next Level: Configuration with Hydra</h2>
+        <p>For ultimate flexibility, you can modify your <code>MetricCollection</code> to accept parameters from your YAML files. This lets you switch metrics on or off without touching the code.</p>
+        <p>First, update the collection to conditionally include metrics:</p>
+        <pre><code># src/models/components/metrics.py
+class ContrastiveMetrics(torchmetrics.MetricCollection):
+    def __init__(self, prefix: str, include_mrr: bool = False):
+        metrics_dict = {
+            "R@1": RecallAtK(k=1),
+            "R@5": RecallAtK(k=5),
+            "R@10": RecallAtK(k=10),
+        }
+        if include_mrr:
+            metrics_dict["MRR"] = MeanReciprocalRank()
+        
+        super().__init__(metrics_dict, prefix=prefix)
+</code></pre>
+        <p>Now, create a new config file to enable it:</p>
+        <p class="file-path">New file: <code>configs/metrics/contrastive_with_mrr.yaml</code></p>
+        <pre><code># @package _group_
+_target_: src.models.components.metrics.ContrastiveMetrics
+include_mrr: True
+</code></pre>
+        <p>You can now run an experiment with MRR enabled via a simple command-line override:</p>
+        <pre><code># The 'prefix' will be automatically set by the main model config
+python src/train.py model/metrics/val_metrics=contrastive_with_mrr
+</code></pre>
+
+        <h2>Conclusion</h2>
+        <p>That's it! Your new metric is now fully integrated. It will be automatically computed, logged, and can be controlled via configuration. This clean, modular design makes maintaining and extending your project's evaluation capabilities straightforward and robust.</p>
+    </div>
+</body>
+</html>
