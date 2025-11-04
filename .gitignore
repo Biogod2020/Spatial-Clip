@@ -143,6 +143,10 @@ dmypy.json
 *.h5
 *.tar
 *.tar.gz
+*.parquet
+*.npy
+*.h5ad
+outputs/
 
 # Lightning-Hydra-Template
 configs/local/default.yaml
@@ -154,3 +158,9 @@ logs/
 .aim
 
 old_merge_files/
+
+# Temporary output files
+nov2_ver2.txt
+treefile.txt
+merged_output.txt
+open_clip_torch.egg-info/
