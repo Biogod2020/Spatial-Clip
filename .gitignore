@@ -63,6 +63,7 @@ htmlcov/
 # Ignore all content within the 'data' directory by default
 data/
 
+
 # You can selectively re-include specific small data files if needed, e.g.:
 # !data/my_small_config.csv
 
