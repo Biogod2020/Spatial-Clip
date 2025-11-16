@@ -1,0 +1,95 @@
+# 继承项目级的路径配置
+defaults:
+  - _self_
+  - /paths: default
+
+# === 数据集布局 ===
+# 每个数据源在 data/ 下遵循以下目录规范：
+#   data/raw/<dataset_key>/              # 原始切片、注释和中间 CSV
+#   data/processed_intermediate/<dataset_key>/   # Anndata 等中间产物
+#   data/processed/<dataset_key>/        # 最终可训练数据（WebDataset/Parquet）
+# 通过 dataset.key 和 paths_layout.* 来派生这些路径，便于在 Hydra 中复用。
+dataset:
+  key: hest_v1
+  description: "HEST 人类 1k 原版"
+
+paths_layout:
+  raw_root: ${paths.data_dir}/raw
+  processed_intermediate_root: ${paths.data_dir}/processed_intermediate
+  processed_root: ${paths.data_dir}/processed
+
+# --- 输入源 ---
+source:
+  raw_data_dir: ${paths_layout.raw_root}/${dataset.key}
+  hest_metadata_csv: ${.raw_data_dir}/HEST_v1_1_0.csv
+  hgnc_path: ${paths.assets_dir}/hgnc_complete_set.txt
+  global_hvg_path: ${paths.data_dir}/derived/global_hvgs.txt
+
+# --- 中间产物与最终输出 ---
+intermediate_dir: ${paths_layout.processed_intermediate_root}/${dataset.key}
+output_dir: ${paths_layout.processed_root}/${dataset.key}
+
+# --- 运行控制 ---
+run:
+  stage: full  # {full, stage_1, stage_2, stage_3, comma-separated}
+
+# --- 流程参数 ---
+params:
+  general:
+    batch_key: 'sample_id'
+    species_filter: "Homo sapiens"
+
+  samples_to_exclude:
+    - 'TENX15'
+    - 'MEND16'
+    - 'MEND15'
+    - 'MEND14'
+    - 'MEND13'
+    - 'MEND12'
+    - 'MEND11'
+    - 'MEND10'
+    - 'MEND9'
+    - 'MEND8'
+    - 'MEND7'
+    - 'MEND2'
+    - 'MEND1'
+    - 'NCBI657'
+    - 'NCBI814'
+
+  gene_alignment:
+    keep_status: ["Approved"]
+    keep_locus_types: null
+
+  # 关键修正：这些QC参数现在只用于HVG计算的临时数据副本，
+  # 不会过滤最终数据集。默认值设为极度宽松，以体现“默认不筛选”的策略。
+  # quality_control_for_hvg:
+  #   min_genes_per_spot: 0
+  #   max_pct_mt: 100.0
+
+  #   min_spot_fraction_per_gene: 0.000
+
+  hvg:
+    n_top_genes: 5000
+    flavor: 'seurat_v3_paper'
+
+  sentence_generation:
+    n_top_genes: 50
+
+  sharding:
+    max_samples_per_shard: 5000
+
+
+  spatial_graph:
+    backend: "squidpy"
+    coord_type: "spatial"
+    n_rings: 1
+
+  # 新增：明确的瓦片生成参数
+  tiling:
+    tile_size: 224
+
+
+# --- 性能控制 ---
+performance:
+  max_workers: 32
+  limit_samples: -1 # -1 表示处理所有样本

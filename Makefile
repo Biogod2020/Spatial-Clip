@@ -1,4 +1,8 @@
 
+PREPROCESS_MODULE ?= src.data.preprocessing
+CFG ?= preprocess/default.yaml
+RUN_STAGE ?= full
+
 help:  ## Show help
 	@grep -E '^[.a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
@@ -28,3 +32,9 @@ test-full: ## Run all tests
 
 train: ## Train the model
 	python src/train.py
+
+preprocess: ## Run preprocessing pipeline (override CFG=preprocess/hest_mouse.yaml or RUN_STAGE=stage-1)
+	PYTHONPATH=. python -m $(PREPROCESS_MODULE) --config-name $(CFG) run.stage=$(RUN_STAGE)
+
+preprocess-hest-v1: ## Full preprocessing run for the canonical HEST dataset
+	$(MAKE) preprocess CFG=preprocess/default.yaml RUN_STAGE=full

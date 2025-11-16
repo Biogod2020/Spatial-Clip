@@ -137,6 +137,19 @@ The directory structure of new project looks like this:
 
 <br>
 
+## 🧬  Spatial Data Pipeline
+
+- **Directory layout:** every dataset uses `data/raw/<dataset_key>`, `data/processed_intermediate/<dataset_key>`, and `data/processed/<dataset_key>`. Declare the key in `configs/preprocess/*.yaml` so paths stay in sync.
+- **Configs:** start from `configs/preprocess/default.yaml` and add overrides such as `configs/preprocess/hest_mouse.yaml` for each new source (species filter, HVG list, tiling size, etc.).
+- **Human smoke subset:** use `configs/preprocess/hest_human_smoke.yaml` to process the three whitelisted Homo sapiens slides (`TENX158`, `TENX157`, `NCBI883`). It sets `dataset.key=hest_v1_smoke` so outputs land in `data/**/hest_v1_smoke` and relies on the new `params.samples_allowlist` knob to keep the run lightweight.
+- **Commands:** run `make preprocess-hest-v1` for the canonical HEST data, or `make preprocess CFG=preprocess/custom.yaml RUN_STAGE=stage-2` to resume a specific stage. Behind the scenes both targets execute the Hydra CLI: `python -m src.data.preprocessing --config-name <cfg> run.stage=<stage>`—no DVC required.
+- **Legacy Typer CLI:** if you still have scripts calling the original Typer interface, replace them with `python -m src.data.preprocessing.cli stage-2 --config-name preprocess/custom.yaml`. The shim simply forwards to the Hydra entrypoint.
+- **Stages in plain language:** Stage 1 merges raw AnnData files and aligns genes, Stage 2 normalizes + filters by the HVG list, Stage 3 tiles/shards the tissue and writes WebDataset tarballs.
+- **Manifest + provenance:** every Stage 3 run emits `manifest.json` with the resolved Hydra config, git SHA, raw directory fingerprint, HVG/HGNC hashes, timing, and shard stats. Inspect it via `python scripts/inspect_manifest.py data/processed/<dataset_key>`.
+- **Documentation:** see `docs/data_pipeline.md` for the full workflow, smoke tests, and onboarding checklist.
+
+<br>
+
 ## 🚀  Quickstart
 
 ```bash
@@ -1083,31 +1096,6 @@ The style guide is available [here](https://pytorch-lightning.readthedocs.io/en/
        def any_extra_hook():
            ...
    ```
-
-</details>
-
-<details>
-<summary><b>Version control your data and models with DVC</b></summary>
-
-Use [DVC](https://dvc.org) to version control big files, like your data or trained ML models.<br>
-To initialize the dvc repository:
-
-```bash
-dvc init
-```
-
-To start tracking a file or directory, use `dvc add`:
-
-```bash
-dvc add data/MNIST
-```
-
-DVC stores information about the added file (or a directory) in a special .dvc file named data/MNIST.dvc, a small text file with a human-readable format. This file can be easily versioned like source code with Git, as a placeholder for the original data:
-
-```bash
-git add data/MNIST.dvc data/.gitignore
-git commit -m "Add raw data"
-```
 
 </details>
 

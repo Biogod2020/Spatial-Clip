@@ -1,0 +1,20 @@
+# Example override for running the preprocessing pipeline on the mouse variant of HEST.
+# Usage: `python src/data/preprocessing/pipeline.py --config-path configs --config-name preprocess/hest_mouse.yaml full-pipeline`
+
+defaults:
+  - default
+
+dataset:
+  key: hest_mouse_v1
+  description: "HEST 小鼠版，按 Mus musculus 过滤"
+
+source:
+  hest_metadata_csv: ${source.raw_data_dir}/HEST_mouse_metadata.csv
+  global_hvg_path: ${paths.data_dir}/derived/mouse_global_hvgs.txt
+
+params:
+  general:
+    species_filter: "Mus musculus"
+
+performance:
+  limit_samples: 128  # 鼓励在鼠标数据上先小规模运行

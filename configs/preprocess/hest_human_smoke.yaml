@@ -1,0 +1,33 @@
+# HEST human smoke run: 2-3 lightweight Homo sapiens slides for fast end-to-end tests
+# Inherit all defaults then override only what we need.
+defaults:
+  - default
+  - _self_
+
+# Use a dedicated dataset key so intermediate/output artifacts are isolated
+# under data/*/<dataset.key>.
+dataset:
+  key: hest_v1_smoke
+  description: "Spatial-CLIP smoke run (selected Homo sapiens slides)"
+
+# Reuse the canonical HEST raw directory but write outputs into
+# data/processed[_intermediate]/hest_v1_smoke.
+source:
+  raw_data_dir: ${paths_layout.raw_root}/hest_v1
+
+# Keep the same global HGNC/HVG resources from the parent config.
+# Intermediate/output dirs are derived from dataset.key automatically.
+
+params:
+  general:
+    species_filter: "Homo sapiens"
+
+  # Explicitly whitelist the exact slides we want to keep runtime predictable.
+  samples_allowlist:
+    - TENX158  # FFPE human skin melanoma (~2k spots)
+    - TENX157  # FFPE human prostate adenocarcinoma (~4k spots)
+    - NCBI883  # Xenium healthy lung (~1.2k spots)
+
+performance:
+  limit_samples: -1   # allowlist already enforces the subset
+  max_workers: 4      # modest parallelism to stay laptop-friendly

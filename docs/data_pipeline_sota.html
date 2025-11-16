@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>Spatial-CLIP 数据管线可视白皮书</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #030711;
+      --card: #101828;
+      --accent: #4f46e5;
+      --accent-2: #0ea5e9;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --border: rgba(255, 255, 255, 0.08);
+    }
+
+    body {
+      margin: 0;
+      font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+      background: radial-gradient(circle at top, rgba(79, 70, 229, 0.45), transparent 45%),
+                  radial-gradient(circle at bottom, rgba(14, 165, 233, 0.35), transparent 55%),
+                  var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+      padding: 0 24px 64px;
+    }
+
+    header {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 80px 0 32px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    header::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(120deg, rgba(79, 70, 229, 0.25), rgba(14, 165, 233, 0.25));
+      filter: blur(120px);
+      z-index: -1;
+      animation: pulse 12s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0% { opacity: 0.65; }
+      50% { opacity: 1; }
+      100% { opacity: 0.65; }
+    }
+
+    h1 {
+      font-size: 2.75rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 1.05rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 24px;
+      max-width: 1080px;
+      margin: 32px auto;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 24px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(120deg, rgba(79, 70, 229, 0.15), transparent 55%);
+      transform: translateY(100%);
+      transition: transform 600ms ease;
+      pointer-events: none;
+    }
+
+    .card:hover::before {
+      transform: translateY(0%);
+    }
+
+    h2 {
+      margin-top: 0;
+    }
+
+    code, pre {
+      font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+    }
+
+    pre {
+      background: rgba(15, 23, 42, 0.85);
+      border-radius: 12px;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 0.9rem;
+    }
+
+    .mermaid {
+      background: rgba(15, 23, 42, 0.85);
+      border-radius: 18px;
+      padding: 24px;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      background: rgba(79, 70, 229, 0.12);
+      border: 1px solid rgba(79, 70, 229, 0.35);
+      color: var(--text);
+    }
+
+    .timeline {
+      position: relative;
+      padding-left: 32px;
+      margin-left: 12px;
+    }
+
+    .timeline::before {
+      content: "";
+      position: absolute;
+      left: 10px;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: linear-gradient(var(--accent), var(--accent-2));
+    }
+
+    .timeline-step {
+      margin-bottom: 28px;
+      position: relative;
+    }
+
+    .timeline-step::before {
+      content: "";
+      position: absolute;
+      left: -30px;
+      top: 4px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--accent-2);
+      border: 2px solid var(--card);
+      box-shadow: 0 0 20px rgba(14, 165, 233, 0.6);
+    }
+
+    a {
+      color: var(--accent-2);
+      text-decoration: none;
+    }
+
+    footer {
+      text-align: center;
+      margin-top: 64px;
+      color: var(--muted);
+    }
+  </style>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "dark" });
+  </script>
+</head>
+<body>
+  <header>
+    <p class="subtitle">Spatial-CLIP · Pipeline & Smoke Tests</p>
+    <h1>从 Hydra 配置到 WebDataset：数据加工的可视探索</h1>
+    <p>本文以动态图、Mermaid 流程图与直观的代码引用，拆解 <code>src/data/preprocessing/pipeline.py</code> 如何把原始组织切片变成可训练的 WebDataset，并展示 smoke test 如何保障流程的可复现性。</p>
+  </header>
+
+  <section class="card" style="max-width: 1080px; margin: 0 auto;">
+    <h2>全局数据流</h2>
+    <div class="badge">Mermaid · end-to-end overview</div>
+    <div class="mermaid">
+      graph TD
+        A[Hydra 配置<br/>configs/preprocess/default.yaml] --> B[Stage 1<br/>merge & align]
+        B --> C[Stage 2<br/>normalize & HVG filter]
+        C --> D[Stage 3<br/>tile + shard]
+        D --> E[WebDataset tars]
+        D --> F[manifest.json]
+        F -.feed.-> G[inspect_manifest.py]
+        A -.provides paths.-> D
+        G -.validates.-> E
+    </div>
+  </section>
+
+  <section class="grid">
+    <article class="card">
+      <h2>Hydra 配置如何定义目录语义</h2>
+      <p>默认配置 <code>configs/preprocess/default.yaml</code> 在开头就宣告数据布局，确保「原始 / 中间 / 最终」三目录一键切换：</p>
+      <pre><code># 片段来自 configs/preprocess/default.yaml
+paths_layout:
+  raw_root: ${paths.data_dir}/raw
+  processed_intermediate_root: ${paths.data_dir}/processed_intermediate
+  processed_root: ${paths.data_dir}/processed
+
+source:
+  raw_data_dir: ${paths_layout.raw_root}/${dataset.key}
+...
+intermediate_dir: ${paths_layout.processed_intermediate_root}/${dataset.key}
+output_dir: ${paths_layout.processed_root}/${dataset.key}</code></pre>
+      <p>借助 <code>dataset.key</code>，每个新数据集只需一个 YAML override 即可拿到隔离的存储空间。</p>
+    </article>
+
+    <article class="card">
+      <h2>Stage 1 · raw → aligned AnnData</h2>
+      <div class="badge">源码节选 · <code>pipeline.py</code></div>
+      <pre><code>def stage_01_merge_and_align(cfg: DictConfig) -&gt; None:
+    dataset = HESTDataset(data_dir=cfg.source.raw_data_dir)
+    samples = [s for s in dataset.get_samples(...) ...]
+    adatas = [load_single_sample_adata(s, batch_key=cfg.params.general.batch_key)
+              for s in tqdm(samples, desc="Loading individual samples")]
+    adata_merged = sc.concat(adatas, join='outer', uns_merge='unique', label="sample_source")
+    canonical_set, synonym_map = load_hgnc_resources(...)
+    adata_aligned = align_and_collapse_genes(adata_merged, canonical_set, synonym_map)
+    adata_aligned.write(intermediate_dir / "adata_aligned_unfiltered.h5ad")</code></pre>
+      <p>这一步完成 raw h5ad 合并 + HGNC 映射，不存在则创建目标文件夹，并缓存结果供 Stage 2 复用。</p>
+    </article>
+
+    <article class="card">
+      <h2>Stage 2 · 标准化 + HVG 过滤</h2>
+      <pre><code>def stage_02_normalize_and_filter(cfg: DictConfig) -&gt; None:
+    hvg_path = Path(cfg.source.global_hvg_path)
+    adata = sc.read_h5ad(intermediate_dir / "adata_aligned_unfiltered.h5ad")
+    hvg_list = set(np.loadtxt(hvg_path, dtype=str))
+    adata_hvg = adata[:, adata.var_names.isin(hvg_list)].copy()
+    normalize_adata(adata_hvg)
+    adata_hvg.write(intermediate_dir / "adata_final_for_sharding.h5ad")</code></pre>
+      <p>Stage 2 的输入/输出路径都取自 Hydra 配置，保证和 Stage 1 的产物严格对齐。</p>
+    </article>
+
+    <article class="card">
+      <h2>Stage 3 · WebDataset + manifest</h2>
+      <pre><code>def stage_03_create_shards(cfg: DictConfig) -&gt; Dict[str, Any]:
+    adata_final = sc.read_h5ad(intermediate_dir / "adata_final_for_sharding.h5ad")
+    futures = {executor.submit(_process_one_sample, sid, ...): sid for sid in sample_ids}
+    ...
+    stats = {
+        "total_processed": int(total_processed),
+        "samples": sample_results,
+    }
+    manifest_path = _write_manifest(cfg, stats)
+    log.info("Manifest: %s", manifest_path)</code></pre>
+      <p>多线程写 shard 时每个 sample 都有独立的目录；收尾阶段调用 <code>_write_manifest</code> 固化运行上下文。</p>
+    </article>
+  </section>
+
+  <section class="card" style="max-width: 1080px; margin: 0 auto;">
+    <h2>Manifest 是如何保证可追溯性的？</h2>
+    <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
+      <div>
+        <div class="badge">核心代码</div>
+        <pre><code>def _write_manifest(cfg, stats):
+    manifest = {
+        "dataset": {
+            "key": _cfg_select(cfg, "dataset.key"),
+            "description": _cfg_select(cfg, "dataset.description"),
+        },
+        "inputs": {
+            "raw_fingerprint": _fingerprint_directory(raw_dir),
+            "global_hvg": _hash_file_info(cfg.source.global_hvg_path),
+            "hgnc_resource": _hash_file_info(cfg.source.hgnc_path),
+        },
+        "execution": {
+            "command": CLI_INVOCATION,
+            "git": _collect_git_metadata(),
+            "hostname": platform.node(),
+        },
+        "outputs": _summarize_output_dir(output_dir),
+        "stats": stats,
+    }
+    json.dump(manifest, output_dir / "manifest.json", indent=2)</code></pre>
+      </div>
+      <div>
+        <div class="badge">字段解读</div>
+        <div class="timeline">
+          <div class="timeline-step">
+            <strong>dataset</strong>: 明确 key/description，方便多数据源并存。
+          </div>
+          <div class="timeline-step">
+            <strong>inputs</strong>: 对 raw 目录进行 SHA256 指纹采样；HVG / HGNC 文件也写入大小与 hash。
+          </div>
+          <div class="timeline-step">
+            <strong>execution</strong>: 记录 CLI 命令、git commit、机器信息，确保复现手册完整。
+          </div>
+          <div class="timeline-step">
+            <strong>outputs</strong>: 统计 shard 个数、总体积、每个样本的子目录与最新修改时间。
+          </div>
+          <div class="timeline-step">
+            <strong>stats</strong>: Stage 3 的运行时指标（耗时、processed/failed）原封写入，供 dashboard/QA 使用。
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="grid">
+    <article class="card">
+      <h2>Smoke Test 如何模拟完整流水线？</h2>
+      <div class="badge">tests/test_preprocess.py</div>
+      <pre><code>@pytest.fixture()
+def smoke_cfg(tmp_path) -&gt; OmegaConf:
+    raw_dir = tmp_path / "raw"
+    ...
+    cfg = OmegaConf.create({
+        "source": {
+            "raw_data_dir": str(raw_dir),
+            "hgnc_path": str(hgnc),
+            "global_hvg_path": str(hvgs),
+        },
+        "intermediate_dir": str(intermediate_dir),
+        "output_dir": str(output_dir),
+        ...
+    })</code></pre>
+      <p>Smoke 测试使用 <code>tmp_path</code> 自动生成沙箱目录，运行结束后 Pytest 会清理所有伪造数据。没有任何多余副作用泄露到 <code>data/</code>。</p>
+    </article>
+
+    <article class="card">
+      <h2>Monkeypatch：替换重型依赖</h2>
+      <pre><code>def test_pipeline_emits_manifest(..., monkeypatch):
+    class DummyDataset:
+        def get_samples(self, species: str | None = None):
+            return [SimpleNamespace(sample_id="sample_a"), ...]
+
+    def fake_process_one_sample(sample_id, adata_sample, cfg):
+        shard_path = (Path(cfg.output_dir) / sample_id / f"{sample_id}_000000.tar")
+        shard_path.write_bytes(b"dummy")
+        return {"processed": int(adata_sample.n_obs), "failed": 0}
+
+    monkeypatch.setattr(pipeline, "HESTDataset", DummyDataset)
+    monkeypatch.setattr(pipeline, "_process_one_sample", fake_process_one_sample)
+
+    pipeline.stage_01_merge_and_align(smoke_cfg)
+    pipeline.stage_02_normalize_and_filter(smoke_cfg)
+    stats = pipeline.stage_03_create_shards(smoke_cfg)
+
+    manifest = json.loads((Path(smoke_cfg.output_dir) / "manifest.json").read_text())
+    assert manifest["stats"]["total_processed"] == stats["total_processed"]</code></pre>
+      <p>通过 monkeypatch，把耗时的图像裁剪 / HGNC 读取全部换成轻量 mock，聚焦于「控制逻辑 + manifest 写入」本身。</p>
+    </article>
+  </section>
+
+  <section class="card" style="max-width: 1080px; margin: 0 auto;">
+    <h2>指尖操作指南</h2>
+    <ul>
+      <li><strong>运行完整流水线：</strong> <code>make preprocess-hest-v1</code></li>
+      <li><strong>只跑单阶段（例如鼠标数据 Stage 2）：</strong> <code>make preprocess CFG=preprocess/hest_mouse.yaml STAGE=stage-2</code></li>
+      <li><strong>检查 manifest：</strong> <code>python scripts/inspect_manifest.py data/processed/&lt;dataset_key&gt;</code></li>
+      <li><strong>复现 smoke test：</strong> <code>pytest -q tests/test_preprocess.py</code></li>
+    </ul>
+  </section>
+
+  <footer>
+    资料来源：<code>src/data/preprocessing/pipeline.py</code> · <code>configs/preprocess/default.yaml</code> · <code>tests/test_preprocess.py</code>
+  </footer>
+  
+</body>
+</html>
