@@ -142,10 +142,12 @@ The directory structure of new project looks like this:
 - **Directory layout:** every dataset uses `data/raw/<dataset_key>`, `data/processed_intermediate/<dataset_key>`, and `data/processed/<dataset_key>`. Declare the key in `configs/preprocess/*.yaml` so paths stay in sync.
 - **Configs:** start from `configs/preprocess/default.yaml` and add overrides such as `configs/preprocess/hest_mouse.yaml` for each new source (species filter, HVG list, tiling size, etc.).
 - **Human smoke subset:** use `configs/preprocess/hest_human_smoke.yaml` to process the three whitelisted Homo sapiens slides (`TENX158`, `TENX157`, `NCBI883`). It sets `dataset.key=hest_v1_smoke` so outputs land in `data/**/hest_v1_smoke` and relies on the new `params.samples_allowlist` knob to keep the run lightweight.
+- **Multi-technology smoke subset:** use `configs/preprocess/hest_multitech_smoke.yaml` when you need six slides touching every available `st_technology` label (Visium, Visium HD, Spatial Transcriptomics, Xenium). Two additional Visium/Xenium samples are included to reach six while still keeping runtime manageable.
 - **Commands:** run `make preprocess-hest-v1` for the canonical HEST data, or `make preprocess CFG=preprocess/custom.yaml RUN_STAGE=stage-2` to resume a specific stage. Behind the scenes both targets execute the Hydra CLI: `python -m src.data.preprocessing --config-name <cfg> run.stage=<stage>`—no DVC required.
 - **Legacy Typer CLI:** if you still have scripts calling the original Typer interface, replace them with `python -m src.data.preprocessing.cli stage-2 --config-name preprocess/custom.yaml`. The shim simply forwards to the Hydra entrypoint.
 - **Stages in plain language:** Stage 1 merges raw AnnData files and aligns genes, Stage 2 normalizes + filters by the HVG list, Stage 3 tiles/shards the tissue and writes WebDataset tarballs.
 - **Manifest + provenance:** every Stage 3 run emits `manifest.json` with the resolved Hydra config, git SHA, raw directory fingerprint, HVG/HGNC hashes, timing, and shard stats. Inspect it via `python scripts/inspect_manifest.py data/processed/<dataset_key>`.
+- **Validation report:** run `scripts/validate_sharded_dataset.py` on any Stage 3 output and review `docs/sharded_dataset_validation_report.md` for smoke/medium findings plus missing-coordinate inventories.
 - **Documentation:** see `docs/data_pipeline.md` for the full workflow, smoke tests, and onboarding checklist.
 
 <br>

@@ -1,0 +1,85 @@
+# Medium-scale HEST human-only run (~50 slides across all technologies)
+defaults:
+  - default
+  - _self_
+
+dataset:
+  key: hest_v1_human_medium
+  description: "HEST medium subset for CLIP pretraining (~50 Homo sapiens slides)"
+
+source:
+  raw_data_dir: ${paths_layout.raw_root}/hest_v1
+
+params:
+  general:
+    species_filter: "Homo sapiens"
+
+  samples_allowlist:
+    # Spatial Transcriptomics (14)
+    - SPA99
+    - SPA125
+    - SPA100
+    - SPA126
+    - SPA101
+    - SPA33
+    - SPA34
+    - SPA35
+    - MEND17
+    - MEND11
+    - MEND18
+    - NCBI762
+    - NCBI764
+    - NCBI763
+
+    # Visium (18)
+    - TENX70
+    - TENX92
+    - TENX90
+    - TENX73
+    - TENX56
+    - TENX27
+    - NCBI776
+    - TENX53
+    - TENX71
+    - INT21
+    - INT19
+    - NCBI675
+    - NCBI674
+    - NCBI673
+    - TENX72
+    - NCBI684
+    - NCBI683
+    - NCBI681
+
+    # Visium HD (6)
+    - TENX155
+    - TENX128
+    - TENX154
+    - TENX156
+    - TENX153
+    - TENX144
+
+    # Xenium (12)
+    - TENX132
+    - TENX111
+    - TENX114
+    - TENX138
+    - TENX98
+    - TENX99
+    - TENX97
+    - TENX121
+    - TENX124
+    - TENX125
+    - TENX123
+    - TENX122
+
+  tiling:
+    tile_size_overrides:
+      Spatial Transcriptomics: 256
+      Visium: 256
+      Visium HD: 512
+      Xenium: 512
+
+performance:
+  max_workers: 8
+  limit_samples: -1

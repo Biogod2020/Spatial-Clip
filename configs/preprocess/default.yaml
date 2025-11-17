@@ -86,7 +86,9 @@ params:
 
   # 新增：明确的瓦片生成参数
   tiling:
-    tile_size: 224
+    tile_size: 256
+    technology_column: st_technology
+    tile_size_overrides: {}
 
 
 # --- 性能控制 ---

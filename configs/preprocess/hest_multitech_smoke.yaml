@@ -1,0 +1,42 @@
+# HEST multi-technology smoke run: 6 slides covering all available platforms
+# We inherit the default config and only override the knobs needed for the subset.
+defaults:
+  - default
+  - _self_
+
+# Give this run a dedicated dataset key so intermediate/output artifacts land in
+# data/*/hest_v1_multitech_smoke instead of colliding with the full corpus.
+dataset:
+  key: hest_v1_multitech_smoke
+  description: "Smoke run spanning Visium, Visium HD, Spatial Transcriptomics, Xenium"
+
+# Reuse the canonical raw directory and shared HGNC/HVG resources.
+source:
+  raw_data_dir: ${paths_layout.raw_root}/hest_v1
+
+params:
+  general:
+    species_filter: "Homo sapiens"
+
+  # The HEST release only exposes four technology labels (Visium, Visium HD,
+  # Spatial Transcriptomics, Xenium). To reach six slides we include two
+  # biologically distinct Visium/Xenium samples while still covering every
+  # platform once.
+  samples_allowlist:
+    - MISC52    # Visium — bowel, 229 spots (tiny Visium example)
+    - NCBI461   # Visium — skin, 1.9k spots (coarser Visium scan)
+    - TENX131   # Visium HD — brain, 1.6k spots
+    - NCBI759   # Spatial Transcriptomics — skin, 462 spots
+    - NCBI858   # Xenium — lung, 837 spots
+    - TENX158   # Xenium — skin melanoma, 2.1k spots
+
+  tiling:
+    tile_size_overrides:
+      Spatial Transcriptomics: 256
+      Visium: 256
+      Visium HD: 512
+      Xenium: 512
+
+performance:
+  limit_samples: -1
+  max_workers: 4
