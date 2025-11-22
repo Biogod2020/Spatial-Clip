@@ -92,6 +92,10 @@ def _process_subgraph_to_sample(
         images_to_process = []
         texts_to_process = []
         spatial_coords = safe_get_spatial_coords(adata)
+        
+        # Get center coordinates for metadata
+        center_coords = spatial_coords[center_node_idx]
+        
         for spot_id in all_spot_ids:
             spot_idx = adata.obs_names.get_loc(spot_id)
             coords = spatial_coords[spot_idx]
@@ -113,9 +117,16 @@ def _process_subgraph_to_sample(
             }
 
         # d. Construct the final sample
+        # SOTA UPDATE: Include pixel coordinates in metadata
         output_sample = {
             "__key__": center_spot_id,
-            "json": json.dumps({"num_nodes": num_nodes, "edge_index": local_edge_index}).encode('utf-8')
+            "json": json.dumps({
+                "sample_id": center_spot_info['sample_id'] if 'sample_id' in center_spot_info else center_spot_id,
+                "num_nodes": num_nodes, 
+                "edge_index": local_edge_index,
+                "x": int(center_coords[0]),
+                "y": int(center_coords[1])
+            }).encode('utf-8')
         }
 
         if config['preprocessing']['precompute_embeddings']:

@@ -37,3 +37,5 @@ test_metrics:
 # --- Hyperparameters (THE "HOW") ---
 optimizer_cfg: ${optimizer}
 scheduler_cfg: ${scheduler}
+
+global_hvg_path: ${paths.data_dir}/derived/global_hvgs.txt

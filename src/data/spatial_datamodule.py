@@ -4,108 +4,14 @@ import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-
-
-import pandas as pd
 import torch
 from lightning import LightningDataModule
-from PIL import Image, ImageFile
+from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, Dataset
 
-# 允许加载可能损坏的图像文件
-Image.MAX_IMAGE_PIXELS = None
-ImageFile.LOAD_TRUNCATED_IMAGES = True
+from src.data.datasets import create_spatial_dataset
 
 log = logging.getLogger(__name__)
-
-
-class SpatiallyAwareParquetDataset(Dataset):
-    """
-    一个专门为 SpaGLaM/Spatial-CLIP 设计的数据集，用于高效读取预处理后的 Parquet 文件。
-    它在初始化时将节点和边信息加载到内存中，以实现快速的 __getitem__ 访问。
-    """
-    _nodes_map_cache: Dict[int, pd.Series] = {} # Worker间共享的缓存
-
-    def __init__(
-        self,
-        data_path: str,
-        k_neighbors: int,
-        preprocess_fn: Callable,
-        tokenizer: Callable,
-    ):
-        """
-        Args:
-            data_path (str): 指向包含 'nodes.parquet' 和 'edges.parquet' 的目录路径 (例如 '.../dataset_split/train').
-            k_neighbors (int): 每个锚点要考虑的最大邻居数量。
-            preprocess_fn (Callable): 应用于每个 PIL 图像的预处理函数。
-            tokenizer (Callable): 用于将基因句子转换为 token ID 的分词器。
-        """
-        self.data_path = Path(data_path)
-        self.k = k_neighbors
-        self.preprocess = preprocess_fn
-        self.tokenizer = tokenizer
-        log.info(f"Initializing SpatiallyAwareParquetDataset for path: {self.data_path}")
-
-        nodes_path = self.data_path / "nodes.parquet"
-        edges_path = self.data_path / "edges.parquet"
-        assert nodes_path.exists() and edges_path.exists(), f"Nodes or Edges file not found in {self.data_path}."
-
-        self.nodes = pd.read_parquet(nodes_path)
-        edges = pd.read_parquet(edges_path)
-        
-        # 优化：构建一个高效的 tile_id -> 邻居信息 的查找字典
-        # 1. 确保每个锚点只保留最多 k 个邻居（按 alpha 排序）
-        log.info(f"Performing top-k neighbor selection (k={self.k}) on {len(edges)} edges...")
-        edges = edges.sort_values('alpha', ascending=False)
-        top_k_edges = edges.groupby('src_tile_id').head(self.k)
-        
-        # 2. 将筛选后的边信息构建成字典
-        self.edges_map = {
-            tile_id: group.reset_index(drop=True)
-            for tile_id, group in top_k_edges.groupby('src_tile_id')
-        }
-        log.info(f"Edges map created with {len(self.edges_map)} anchors.")
-
-    def __len__(self) -> int:
-        return len(self.nodes)
-
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
-        """
-        获取一个样本，包括锚点信息及其邻居信息。
-        """
-        anchor_info = self.nodes.iloc[idx]
-        anchor_id = anchor_info['tile_id']
-        
-        try:
-            # 加载和处理锚点图像
-            anchor_image = self.preprocess(Image.open(anchor_info['image_path']).convert("RGB"))
-            # 分词锚点文本
-            anchor_text = self.tokenizer([anchor_info['gene_sentence']])[0]
-        except Exception as e:
-            log.error(f"Error loading data for anchor_id {anchor_id} at index {idx}: {e}")
-            # 返回一个有效的 "空" 样本或重新尝试加载另一个样本
-            # 这里我们简单地返回一个占位符，但在实际训练中可能需要更复杂的处理
-            return self.__getitem__((idx + 1) % len(self))
-
-        # 从预构建的 map 中获取邻居信息
-        neighbors_df = self.edges_map.get(anchor_id, pd.DataFrame())
-        
-        nbr_ids = neighbors_df['nbr_tile_id'].tolist() if not neighbors_df.empty else []
-        nbr_alphas = neighbors_df['alpha'].tolist() if not neighbors_df.empty else []
-            
-        # --- 关键步骤：填充到固定长度 k ---
-        pad_count = self.k - len(nbr_ids)
-        if pad_count > 0:
-            nbr_ids.extend([-1] * pad_count)  # -1 作为无效邻居的标志
-            nbr_alphas.extend([0.0] * pad_count)
-            
-        return {
-            "image": anchor_image,
-            "text": anchor_text,
-            "anchor_tile_id": anchor_id,
-            "neighbor_tile_ids": nbr_ids,
-            "neighbor_alphas": nbr_alphas,
-        }
 
 
 class SpatialClipDataModule(LightningDataModule):
@@ -119,6 +25,9 @@ class SpatialClipDataModule(LightningDataModule):
         batch_size: int,
         num_workers: int = 0,
         pin_memory: bool = False,
+        dataset_format: str = "parquet_v1",
+        dataset_format_kwargs: Optional[Dict[str, Any]] = None,
+        splits: Optional[Dict[str, Any]] = None,
     ):
         super().__init__()
         self.save_hyperparameters(logger=False)
@@ -134,17 +43,33 @@ class SpatialClipDataModule(LightningDataModule):
         self.preprocess_fn: Optional[Callable] = None
         self.tokenizer: Optional[Callable] = None
 
+        self.dataset_format = dataset_format
+        self.dataset_format_kwargs = self._to_container(dataset_format_kwargs)
+        default_splits = {"train": "train", "val": "val", "test": None}
+        user_splits = self._to_container(splits) if splits else {}
+        self.splits = {**default_splits, **user_splits}
+
     def prepare_data(self) -> None:
         """
         一次性数据准备。在我们的工作流中，这个步骤已经在 notebooks 中手动完成。
         这里我们只检查路径是否存在。
         """
-        if not self.train_path.exists() or not self.val_path.exists():
-            raise FileNotFoundError(
-                f"Training path '{self.train_path}' or validation path '{self.val_path}' not found. "
-                "Please run the preprocessing notebooks first to generate the split dataset."
-            )
-        log.info("Train and validation data paths verified.")
+        if self.dataset_format in {"parquet", "parquet_v1"}:
+            missing: List[Path] = []
+            for split_name in ("train", "val"):
+                spec = self.splits.get(split_name)
+                if isinstance(spec, str):
+                    candidate = self.data_dir / spec
+                    if not candidate.exists():
+                        missing.append(candidate)
+            if missing:
+                raise FileNotFoundError(
+                    "Missing parquet dataset splits: " + ", ".join(str(p) for p in missing)
+                )
+        else:
+            if not self.data_dir.exists():
+                raise FileNotFoundError(f"Dataset directory '{self.data_dir}' not found.")
+        log.info("Dataset paths verified for format %s", self.dataset_format)
 
     def setup(self, stage: Optional[str] = None) -> None:
         """
@@ -156,21 +81,11 @@ class SpatialClipDataModule(LightningDataModule):
             
         if stage == "fit" or stage is None:
             if not self.data_train:
-                log.info("Setting up train dataset.")
-                self.data_train = SpatiallyAwareParquetDataset(
-                    data_path=str(self.train_path),
-                    k_neighbors=self.hparams.k_neighbors,
-                    preprocess_fn=self.preprocess_fn,
-                    tokenizer=self.tokenizer,
-                )
+                log.info("Setting up train dataset (%s)", self.dataset_format)
+                self.data_train = self._build_dataset("train")
             if not self.data_val:
-                log.info("Setting up validation dataset.")
-                self.data_val = SpatiallyAwareParquetDataset(
-                    data_path=str(self.val_path),
-                    k_neighbors=self.hparams.k_neighbors,
-                    preprocess_fn=self.preprocess_fn,
-                    tokenizer=self.tokenizer,
-                )
+                log.info("Setting up validation dataset (%s)", self.dataset_format)
+                self.data_val = self._build_dataset("val")
 
     def _create_dataloader(self, dataset: Dataset, shuffle: bool) -> DataLoader:
         return DataLoader(
@@ -204,7 +119,7 @@ class SpatialClipDataModule(LightningDataModule):
         neighbor_tile_ids = [item['neighbor_tile_ids'] for item in batch]
         neighbor_alphas = [item['neighbor_alphas'] for item in batch]
 
-        return {
+        batch_dict = {
             "images": images,
             "texts": texts,
             "image_tile_ids": torch.tensor(anchor_tile_ids, dtype=torch.long),
@@ -212,3 +127,34 @@ class SpatialClipDataModule(LightningDataModule):
             "neighbor_tile_ids": torch.tensor(neighbor_tile_ids, dtype=torch.long),
             "neighbor_alphas": torch.tensor(neighbor_alphas, dtype=torch.float32),
         }
+
+        if 'raw_text' in batch[0]:
+            batch_dict['raw_text'] = [item['raw_text'] for item in batch]
+
+        if 'rank_weighted_vector' in batch[0] and batch[0]['rank_weighted_vector'].numel() > 0:
+            batch_dict['rank_weighted_vector'] = torch.stack([item['rank_weighted_vector'] for item in batch])
+
+        return batch_dict
+
+    def _build_dataset(self, split_name: str) -> Dataset:
+        split_spec = self.splits.get(split_name)
+        if split_spec is None:
+            raise ValueError(f"No split specification provided for '{split_name}'")
+        return create_spatial_dataset(
+            format_name=self.dataset_format,
+            data_dir=self.data_dir,
+            split_name=split_name,
+            split_spec=split_spec,
+            k_neighbors=self.hparams.k_neighbors,
+            preprocess_fn=self.preprocess_fn,
+            tokenizer=self.tokenizer,
+            format_kwargs=self.dataset_format_kwargs,
+        )
+
+    @staticmethod
+    def _to_container(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        if data is None:
+            return {}
+        if isinstance(data, dict):
+            return data
+        return OmegaConf.to_container(data, resolve=True)

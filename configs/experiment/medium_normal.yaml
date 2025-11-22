@@ -1,0 +1,23 @@
+# @package _global_
+
+defaults:
+  - override /data: spatial
+  - override /loss: clip
+
+tags: ["medium", "normal", "shards"]
+
+data:
+  dataset_format: shards_v1
+  data_dir: ${paths.root_dir}/data/processed/hest_v1_human_medium
+  splits:
+    train: ${paths.root_dir}/data/processed/hest_v1_human_medium/train_samples.txt
+    val: ${paths.root_dir}/data/processed/hest_v1_human_medium/val_samples.txt
+    test: ${paths.root_dir}/data/processed/hest_v1_human_medium/test_samples.txt
+  batch_size: 32
+  num_workers: 8
+
+trainer:
+  max_epochs: 2
+  accelerator: auto
+  devices: 1
+  log_every_n_steps: 10

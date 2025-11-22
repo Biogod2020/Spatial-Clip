@@ -1,6 +1,7 @@
 # src/models/spatial_clip_module.py
 import inspect  # <-- 1. 导入 inspect 模块
-from typing import Any, Dict
+from typing import Any, Dict, Optional
+from pathlib import Path
 
 import torch
 from lightning import LightningModule
@@ -9,6 +10,7 @@ from torch.nn import Module as LossFunction
 from torchmetrics import MetricCollection
 
 from .components.spatial_clip_net import SpatialClipNet
+from src.metrics.zero_shot import ZeroShotGeneExpressionMetric
 
 
 class SpatialClipLitModule(LightningModule):
@@ -21,6 +23,7 @@ class SpatialClipLitModule(LightningModule):
         train_metrics: MetricCollection,
         val_metrics: MetricCollection,
         test_metrics: MetricCollection,
+        global_hvg_path: Optional[str] = None,
     ):
         super().__init__()
         self.save_hyperparameters(logger=True, ignore=["net", "loss_fn"])
@@ -29,6 +32,13 @@ class SpatialClipLitModule(LightningModule):
         self.train_metrics = train_metrics
         self.val_metrics = val_metrics
         self.test_metrics = test_metrics
+        
+        self.global_hvg_path = global_hvg_path
+        self.zero_shot_metric = None
+        self.gene_bank_embeddings = None
+        
+        if self.global_hvg_path:
+            self.zero_shot_metric = ZeroShotGeneExpressionMetric(global_hvg_path=self.global_hvg_path)
 
         # 2. ✅ CodeGuardian: 在初始化时，一次性检查并缓存损失函数需要的参数名集合。
         self._loss_fn_arg_names = set(inspect.signature(self.loss_fn.forward).parameters.keys())
@@ -57,7 +67,37 @@ class SpatialClipLitModule(LightningModule):
         output = {"loss": loss_dict["contrastive_loss"]}
         logits_per_image = features["image_features"] @ features["text_features"].T * features["logit_scale"]
         output["logits"] = logits_per_image
+        output["image_features"] = features["image_features"]
         return output
+
+    def on_validation_start(self):
+        if self.zero_shot_metric and self.gene_bank_embeddings is None:
+            hvg_path = Path(self.global_hvg_path)
+            if hvg_path.exists():
+                with open(hvg_path, "r") as f:
+                    gene_list = [line.strip() for line in f if line.strip()]
+                
+                if gene_list:
+                    device = self.device
+                    all_embeddings = []
+                    batch_size = 256
+                    
+                    was_training = self.net.training
+                    self.net.eval()
+                    
+                    with torch.no_grad():
+                        for i in range(0, len(gene_list), batch_size):
+                            batch_genes = gene_list[i:i+batch_size]
+                            text_tokens = self.net.tokenizer(batch_genes).to(device)
+                            embeddings = self.net.model.encode_text(text_tokens, normalize=True)
+                            all_embeddings.append(embeddings)
+                    
+                    self.gene_bank_embeddings = torch.cat(all_embeddings, dim=0)
+                    
+                    if was_training:
+                        self.net.train()
+            else:
+                print(f"Warning: Global HVG path {hvg_path} not found.")
 
     # ... training_step, validation_step, test_step, 和 configure_optimizers 保持不变 ...
     def training_step(self, batch: Dict[str, Any], batch_idx: int) -> torch.Tensor:
@@ -73,11 +113,27 @@ class SpatialClipLitModule(LightningModule):
         self.val_metrics(output["logits"], torch.arange(len(output["logits"]), device=self.device))
         self.log_dict(self.val_metrics, on_step=False, on_epoch=True, sync_dist=True)
 
+        if self.zero_shot_metric and self.gene_bank_embeddings is not None:
+            if "raw_text" in batch:
+                raw_texts = batch["raw_text"]
+                image_features = output["image_features"]
+                logits = image_features @ self.gene_bank_embeddings.T
+                self.zero_shot_metric.update(logits, raw_texts)
+                self.log("val/zero_shot_pcc", self.zero_shot_metric, on_step=False, on_epoch=True, sync_dist=True)
+
     def test_step(self, batch: Dict[str, Any], batch_idx: int) -> None:
         output = self.model_step(batch)
         self.log("test/loss", output["loss"], on_step=False, on_epoch=True, sync_dist=True)
         self.test_metrics(output["logits"], torch.arange(len(output["logits"]), device=self.device))
         self.log_dict(self.test_metrics, on_step=False, on_epoch=True, sync_dist=True)
+
+        if self.zero_shot_metric and self.gene_bank_embeddings is not None:
+            if "raw_text" in batch:
+                raw_texts = batch["raw_text"]
+                image_features = output["image_features"]
+                logits = image_features @ self.gene_bank_embeddings.T
+                self.zero_shot_metric.update(logits, raw_texts)
+                self.log("test/zero_shot_pcc", self.zero_shot_metric, on_step=False, on_epoch=True, sync_dist=True)
         
     def configure_optimizers(self) -> Dict[str, Any]:
         optimizer = self.hparams.optimizer_cfg(params=self.parameters())

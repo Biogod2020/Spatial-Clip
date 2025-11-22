@@ -1,0 +1,21 @@
+# @package _global_
+
+defaults:
+  - override /data: spatial
+
+tags: ["smoke", "shards"]
+
+data:
+  dataset_format: shards_v1
+  data_dir: ${paths.root_dir}/data/processed/hest_v1_smoke
+  splits:
+    train: ["NCBI883", "TENX157", "TENX158"]
+    val: ["NCBI883"]
+    test: ["TENX157"]
+  batch_size: 16
+  num_workers: 0
+
+trainer:
+  fast_dev_run: True
+  accelerator: auto
+  devices: 1

@@ -1,0 +1,4 @@
+# configs/logger/aim_csv.yaml
+defaults:
+  - aim
+  - csv

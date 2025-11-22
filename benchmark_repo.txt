@@ -1,0 +1,4614 @@
+===== README.md =====
+## _Benchmarking the translational potential of spatial gene expression prediction from histology_
+
+This benchmarking pipeline is designed to provide a comprehensive evaluation of methods that predict spot-based spatial gene expression using histology images
+
+### We employed a hierarchy of evaluation categories: 
+(1) within image spatial gene expression (SGE) prediction performance for lower-resolution spatial transcriptomics (ST) and higher-resolution 10x Visium data<br> 
+(2) cross-study model generalisability, evaluated by applying models trained on ST data to predict Visium tissues, as well as to predict TCGA images to identify whether models were useful for predicting existing H&E images;<br>
+(3) clinical translational impact through the prediction of survival outcomes and canonical pathological regions using predicted SGE from TCGA;<br>
+(4) usability of the methods encompassing code, documentation and the manuscript;<br>
+(5) the computational efficiency.<br>
+
+![image](https://github.com/SydneyBioX/HEtoSGEBench/blob/main/Framework.jpg)
+
+### Processed Data
+The processed datasets required for reproduction are available on Zenodo and can be accessed via this DOI link:<br>
+https://doi.org/10.5281/zenodo.14602489<br>
+Please download and store them in the appropriate directories as required by the scripts.
+
+### Reproduction Steps
+We provide the code to reproduce the evaluation results and figures from our work. Please follow the order of the .Rmd files to process your raw prediction data and obtain the results:
+
+- 00-CombineDat.Rmd contains an example dataset and the code used to calculate several evaluation metrics between the predicted SGE and the ground truth.
+- 01-BenchmarkUsability.Rmd contains the code used to generate usability plot for each method.
+- 02-BenchmarkPredictedExprs.Rmd contains the code used to generate ST and 10x Visium Spatial Gene Expression metrics.
+- 03-BenchmarkTCGA.Rmd contains the code used to perform survival analysis using TCGA data.
+- 04-BenchmarkRanks.Rmd contains the code used to rank each method based on six categories: ST SGE prediction, Visium SGE prediction, model generalisability, clinical impact, usability, and efficiency. The rankings are visualized using a funky heatmap.
+
+### Reference
+If you have any questions, particularly regarding data processing, please contact chuhan.wang@sydney.edu.au. We welcome any suggestions and comments.
+
+Wang, C., & Chan, A. (2025). Benchmarking the translational potential of spatial gene expression prediction from histology (3.0). Zenodo. https://doi.org/10.5281/zenodo.14602489
+
+===== benchmark pipeline/02-BenchmarkPredictedExprs.Rmd =====
+---
+title: "02-BenchMarkPredictedExprs"
+date: "2024-12-30"
+editor_options: 
+  chunk_output_type: console
+output: 
+  html_document:
+    encoding: UTF-8
+    code_folding: hide
+license: >
+  Copyright 2024 Chuhan Wang, Adam S. Chan, Xiaohang Fu, Shila Ghazanfar, Jinman Kim, Ellis Patrick, Jean YH Yang. Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0. Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Libraries
+```{r}
+suppressPackageStartupMessages({
+  # Load required packages
+  library(rlang)
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(viridisLite)
+  library(pals)
+  library(ComplexHeatmap)
+  library(circlize)
+  library(dendsort)
+  library(ggtree)
+  library(cowplot)
+  library(ggsignif)
+  library(scran)
+  library(aricode)
+  library(ggthemr)
+  library(mclust)
+  library(effsize)
+  library(broom)
+  source("benchmarkUtils.R")
+})
+
+minMaxScaler <- function(x) {
+  (x-min(x, na.rm=T))/(max(x, na.rm=T)-min(x, na.rm=T))
+}
+rename <- dplyr::rename
+select <- dplyr::select
+slice <- dplyr::slice
+# Set ggplot theme
+ggthemr_reset()
+ggthemr('pale')
+mycolors <- c("#999999", "#0072B2", "#E69F00", "#F0E442", "#D9B3FF", "#009E73",  
+               "#D55E00", "#5D8AA8", "#CC79A7", "#56B4E9",
+              "#F3B3A6", "#A5AB81", "#B2182B", "#4393C3", "#CDBE6B", 
+              "#80CDC1", "#F4A582", "#BABABA", "#CCEBC5", "#DECBE4",
+              "#FDDFDF", "#B3DE69", "#FDBF6F", "#CCECE6", "#FB8072")
+
+dl_method_pal <- c(
+  "TCGN" = "#CA9C91", 
+  "THItoGene" ="#BA7FB5",
+  "EGNv1" = "#B3D46B", 
+  "EGNv2" =  "#F7CBDF",
+  "DeepPT"="#80B1D2",
+  "DeepSpaCE"="#F18072", 
+  "ST-Net"="#8CD0C3",
+  "HisToGene"="#f1c232",
+  "Hist2ST"="#F9B063",
+  "GeneCodeR"="#BCB9D8",
+  "iStar"= "#D9B3FF",
+  "RNA-Seq"="#BABABA",
+  "RNA-Seq-STgenes"="#BABABA"
+  )
+
+mypalette <- define_palette(
+  swatch = mycolors,
+  gradient = c(lower = mycolors[1L], upper = mycolors[3L])
+)
+
+ggthemr(mypalette) # for some reason it uses the first colour as the colour of the grid lines
+theme_update(panel.grid.major = element_line(linetype="dotted"))
+
+th <-   theme(text=element_text(size=16),
+                axis.text.x = element_text(angle = 0, hjust = 0.5),
+                panel.grid.major = element_blank(),
+                panel.grid.minor = element_blank(),
+                panel.background = element_rect(colour = "black", size=0.7, fill=NA) )
+```
+
+### Load Data
+
+##### Load data for HER2ST dataset
+
+```{r}
+# Load data
+# Get all expression and prediction data
+comb_pred_dat <- readRDS("data/processed/her2st/her2st_comb_pred_dat_11.rds") %>%
+  mutate(model_id = ifelse(model_id =="genecoder_i500_j500",
+                           "GeneCodeR", model_id))
+
+# Get calculated metrics
+pred_feat_cor <- readRDS("data/processed/her2st/her2st_pred_feat_cor_11.rds") %>%
+  mutate(model_id = case_when(
+    model_id == "genecoder_i500_j500" ~ "GeneCodeR",
+    TRUE ~ model_id
+  ))
+
+# Get original gene expression per patch
+deeppt_exprs_df <- read.csv("data/processed/her2st/processed_expr.csv")
+
+# Highly Variable Genes
+# use methods from scran (Lun, McCarthy, and Marioni 2016) to identify a set of top highly variable genes (HVGs)
+dec_her2st <- modelGeneVar(deeppt_exprs_df %>%
+                             select(-X) %>%
+                             t())
+# Get the top 10% HVGs.
+hv_genes <- getTopHVGs(dec_her2st, prop=.100)
+```
+
+*comb_pred_dat* is a dataframe with the following columns:
+
+- img_id: id of image
+- model_id: the name of method predicting gene expression
+- patch_id: id of image patch, containing image + patch coordinates
+- pred_type: whether the evaluation metrics were calculated on the "train", "test" or 
+"validation" sets
+- train_fold: an id for the fold the model was trained and tested on
+- gene: name of the gene that was predicted
+- pred: predicted gene expression count
+- exprs: ground truth gene expression count
+
+```{r}
+glimpse(comb_pred_dat)
+```
+
+*pred_feat_cor* is a dataframe with the following columns:
+
+- img_id: id of image
+- model_id: the name of method predicting gene expression
+- gene: name of the gene that was predicted
+- pred_type: whether the evaluation metrics were calculated on the "train", "test" or 
+"validation" sets
+- train_fold: an id for the fold the model was trained and tested on
+- cor_pearson: Pearson correlation
+- cor_spearman: Spearman correlation
+- var_exprs: variance of the gene expression data the model was trained on
+- var_exprs_orig: variance of the ground truth gene expression counts
+- var_pred: variance of the predicted gene expression
+- mean_exprs: mean of the gene expression data the model was trained on
+- mean_exprs_orig: mean of the ground truth gene expression counts
+- mean_pred: mean of the predicted gene expression
+- rmse: root mean squared error
+- mi: mutual information
+- js_div: Jensen-Shannon divergence
+- nrmse_range: RMSE normalised using the range of the data
+- nrmse_sd: RMSE normalised using the standard deviation of data
+- ssim: structural similarity index
+- auc_n: original ground truth gene expression is binarised by $GE <= n$ and $GE > n$. 
+auc_n represents the auc of the predicted gene expression distinguishing the binarisation of the original gene expression
+
+```{r}
+glimpse(pred_feat_cor)
+```
+
+##### Load data for CSCC dataset
+
+```{r}
+#prediction metrics
+pred_feat_cor_cscc <- readRDS("data/processed/cscc/cscc_pred_feat_cor_11.rds") %>%
+  mutate(model_id = case_when(
+    model_id == "genecoder_i500_j500" ~ "GeneCodeR",
+    TRUE ~ model_id
+  )) 
+
+# Get original gene expression per patch
+deeppt_exprs_df_cscc <- read.csv("data/processed/cscc/processed_expr.csv")
+
+# Highly Variable Genes
+dec_cscc <- modelGeneVar(deeppt_exprs_df_cscc %>%
+                             select(-c(X)) %>%
+                             t())
+# Get the top 10% of genes.
+hv_genes_cscc <- getTopHVGs(dec_cscc, prop=.100)
+```
+
+##### Load data for HER2+ trained models used for Visium-HER2+ prediction
+
+```{r}
+pred_feat_cor_her2_bc <- readRDS("data/processed/visium/visium_her2_bc_pred_feat_cor_10.rds") %>%
+  mutate(model_id = case_when(
+    model_id == "genecoder_i500_j500" ~ "GeneCodeR",
+    TRUE ~ model_id
+  )) 
+```
+
+##### Load data for Visium-Hercep-Test2+ (used for training) and Visium-HER2+ (used for testing) 
+
+```{r}
+#prediction results of using 990 HVGs for training and testing
+pred_feat_cor_whole_bc_990 <- readRDS("data/processed/visium/visium_whole_bc_pred_feat_cor_990_genes_6.rds") %>%
+  mutate(model_id = case_when(
+    model_id == "genecoder_i500_j500" ~ "GeneCodeR",
+    TRUE ~ model_id
+  )) 
+
+#prediction results of using 274 High-sparsity genes (HSGs) for training and testing
+pred_feat_cor_whole_bc_274 <- readRDS("data/processed/visium/visium_whole_bc_pred_feat_cor_274_genes_7.rds") %>%
+  mutate(model_id = case_when(
+    model_id == "genecoder_i500_j500" ~ "GeneCodeR",
+    TRUE ~ model_id
+  )) 
+
+# Get original gene expression per patch
+deeppt_exprs_df_whole_bc<- read.csv("data/processed/visium/processed_visium_bc_expr_990.csv")
+
+# Highly Variable Genes
+dec_whole_bc<- modelGeneVar(deeppt_exprs_df_whole_bc %>%
+                             select(-c(X)) %>%
+                             t())
+# Get the top 10% of genes.
+hv_genes_whole_bc <- getTopHVGs(dec_whole_bc, prop=.100)
+```
+
+##### Load data for Visium-Kidney dataset
+
+```{r}
+#prediction results of using 992 HVGs for training and testing
+pred_feat_cor_kidney_992 <- readRDS("data/processed/visium/visium_kidney_pred_feat_cor_992_genes_6.rds") %>%
+  mutate(model_id = case_when(
+    model_id == "genecoder_i500_j500" ~ "GeneCodeR",
+    TRUE ~ model_id
+  )) 
+
+#prediction results of using 145 High-sparsity genes (HSGs) for training and testing
+pred_feat_cor_kidney_145 <- readRDS("data/processed/visium/visium_kidney_pred_feat_cor_145_genes_8.rds") %>%
+  mutate(model_id = case_when(
+    model_id == "genecoder_i500_j500" ~ "GeneCodeR",
+    TRUE ~ model_id
+  )) 
+
+# Get original gene expression per patch
+deeppt_exprs_df_kidney<- read.csv("data/processed/visium/processed_expr_kidney.csv")
+
+# Highly Variable Genes
+dec_kidney<- modelGeneVar(deeppt_exprs_df_kidney %>%
+                             select(-c(X)) %>%
+                             t())
+# Get the top 10% of genes.
+hv_genes_kidney <- getTopHVGs(dec_kidney, prop=.100)
+```
+
+##### Load SVGs
+
+```{r}
+#HER2+
+svg_genes <- readRDS("data/processed/her2st/her2st_SVG_filter_top20.rds")
+#cSCC
+svg_genes_cscc <- readRDS("data/processed/cscc/cscc_SVG_filter_top20.rds")
+#Visium-HER2+
+svg_bc <- readRDS("data/processed/visium/visium_bc_SVG_filter_top20.rds")
+#Visium-Kidney
+svg_kidney <- readRDS("data/processed/visium/kidney_SVG_filter_top20_whole_image.rds")
+```
+
+#### Image - Predicted vs Truth - Figure 2c
+
+```{r fig.height=2, fig.width=16}
+# Plot predicted vs truth for top genes for one image
+filt_gene_df <- comb_pred_dat %>%
+  filter(pred_type == "test") %>%
+  filter(img_id == "B1" &
+           gene %in% "FASN") %>%
+  separate("patch_id",
+           c("img_id", "patch_coord"),
+           sep = "_",
+           remove = FALSE) %>%
+  separate("patch_coord", c("x", "y"), sep = "x")
+
+filt_gene_df <- filt_gene_df %>%
+  bind_rows(
+    filt_gene_df %>%
+      filter(model_id == "DeepPT") %>%
+      mutate(pred = exprs) %>%
+      mutate(model_id = "Ground Truth")
+  ) %>%
+  mutate_at(c("x", "y"), as.numeric) %>%
+  group_by(model_id, gene) %>%
+  mutate(pred = minMaxScaler(pred))
+
+fig2_exprs <- filt_gene_df %>%
+  mutate(model_id = factor(
+    model_id,
+    levels = c(
+      "Ground Truth","ST-Net", "HisToGene", "GeneCodeR", "DeepSpaCE", "DeepPT", "Hist2ST", "EGNv1", "EGNv2", "TCGN", "THItoGene", "iStar"
+    )
+  )) %>%
+  ggplot() +
+  aes(x = x, y = -y, col = pred) +
+  geom_point(size=1.2) +
+  facet_wrap(~ model_id, scales = "free",
+             ncol = 12) +
+  scale_color_viridis_c() +
+  labs(col = "Scaled Expression",x="",y="") +
+  theme(
+    axis.ticks = element_blank(),
+    axis.text = element_blank(),
+    axis.line = element_blank(),
+    panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+    legend.text = element_text(size=10),
+    legend.key.size = unit(15, 'points'),
+    legend.title = element_text(size=12),
+    strip.text.x = element_text(size=12)
+  )
+
+fig2_exprs
+```
+
+#### Figure 2d
+
+Boxplot/violin plots of the average PCC, MI, SSIM and AUC between the ground truth gene expression and predicted gene expression. Metrics measured from the test fold of a 4-fold CV, averaged over each gene across HER2+ and CSCC ST datasets.
+
+```{r fig.height=5.5, fig.width=10}
+#' Plot Boxplots of Correlations
+pred_gene_msr_df <- pred_feat_cor %>%
+  mutate(dataset = "her2+") %>%
+  bind_rows(
+    pred_feat_cor_cscc %>%
+      mutate(dataset="cscc")
+  ) %>%
+  filter(pred_type == "test") %>%
+  select(gene, pred_type, train_fold, model_id,dataset,
+         img_id, cor_pearson, mi, ssim, auc_0) %>%
+  # Average images over each patient
+  group_by(gene, pred_type, train_fold, model_id, dataset) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  # # Average all folds and patients over each gene
+  group_by(pred_type, gene, model_id, dataset) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T))
+
+th <-   theme(text=element_text(size=16),
+                axis.text.x = element_text(angle = 0, hjust = 0.5),
+                panel.grid.major = element_blank(),
+                panel.grid.minor = element_blank(),
+                panel.background = element_rect(colour = "black", size=0.7, fill=NA) )
+
+pred_gene_msr_df <- pred_gene_msr_df%>%
+  arrange(factor(model_id, levels=c("iStar","THItoGene", "TCGN", "EGNv2", "EGNv1", "Hist2ST", "DeepPT", "DeepSpaCE", "GeneCodeR", "HisToGene", "ST-Net")))
+pred_gene_msr_df$model_id <- factor(pred_gene_msr_df$model_id, levels = unique(pred_gene_msr_df$model_id))
+
+fig_2d <- pred_gene_msr_df %>%
+  pivot_longer(cols=c("cor_pearson","mi", "ssim","auc_0"),
+               names_to="metric",
+               values_to="value") %>%
+  mutate(metric = factor(metric, levels = c("cor_pearson","mi",
+                                            "js_div","nrmse_sd","ssim", "auc_0"))) %>%
+  mutate(metric=case_when(
+    metric=="cor_pearson" ~ "PCC",
+    metric=="mi" ~ "MI",
+    metric=="ssim" ~ "SSIM",
+    metric=="auc_0"~"AUC",
+    TRUE ~ "other"
+  ) %>%
+    factor(., levels=c("PCC","MI","SSIM","AUC"))) %>%
+  ggplot() +
+  aes(x=model_id, y=value, fill=model_id, col=model_id) +
+  geom_violin(alpha=0.2) +
+  geom_boxplot(alpha=0.5, width=0.3) +
+  facet_wrap(~metric, nrow=2, scales="free") +
+  coord_flip()+
+  scale_color_manual(values=dl_method_pal)+
+  scale_fill_manual(values=dl_method_pal)+
+  theme(legend.position = "none") +
+  th + 
+  labs(x="", y="")
+
+fig_2d
+```
+
+#### Supplementary Figure 1
+
+Violin and boxplots of evaluation metrics for gene expression for each method in the HER2+ ST dataset
+
+```{r fig.height=12, fig.width=18}
+# Plot Boxplots of Correlations
+pred_gene_msr_df <- pred_feat_cor %>%
+  mutate(gene_set = "All Genes") %>%
+  bind_rows(
+    pred_feat_cor %>%
+      ungroup() %>%
+      filter(gene %in% hv_genes) %>%
+      mutate(gene_set = "HVGs")
+  ) %>%
+  bind_rows(
+    pred_feat_cor %>%
+      ungroup() %>%
+      semi_join(svg_genes, by = c("gene", "img_id")) %>%
+      mutate(gene_set = "SVGs")
+  ) %>%
+  select(gene, pred_type, train_fold, model_id,
+         img_id, cor_pearson, nrmse_sd, js_div, mi, ssim, auc_0,
+         gene_set) %>%
+  # Average image over each patient
+  group_by(gene, pred_type, train_fold, gene_set, model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  # Average all folds and patients over each gene
+  group_by(pred_type, gene, gene_set, model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T))
+
+pred_gene_msr_df %>%
+  filter(pred_type == "test") %>%
+  group_by(model_id) %>%
+  summarise_at(vars(c(cor_pearson, mi, ssim, auc_0)), mean)
+
+
+pred_gene_msr_df <- pred_gene_msr_df%>%
+  arrange(factor(model_id, levels=c("ST-Net", "HisToGene", "GeneCodeR", "DeepSpaCE", "DeepPT", "Hist2ST", "EGNv1", "EGNv2", "TCGN", "THItoGene")))
+pred_gene_msr_df$model_id <- factor(pred_gene_msr_df$model_id, levels = unique(pred_gene_msr_df$model_id))
+
+#boxplots of metrics
+p_all_boxplots_her2 <- pred_gene_msr_df %>%
+  filter(pred_type == "test") %>%
+  pivot_longer(cols=c("cor_pearson", "nrmse_sd", "js_div", "mi", "ssim","auc_0"),
+               names_to="metric",
+               values_to="value") %>%
+  mutate(metric = factor(metric, levels = c("cor_pearson","mi",
+                                            "js_div","nrmse_sd","ssim", "auc_0"))) %>%
+  ggplot() +
+  aes(x=model_id, y=value, fill=model_id, col=model_id) +
+  geom_violin(alpha=0.2) +
+  geom_boxplot(alpha=0.5, width=0.3) +
+  facet_wrap(~gene_set + metric,
+             nrow=3, scales="free") +
+  scale_color_manual(values=dl_method_pal)+
+  scale_fill_manual(values=dl_method_pal)+
+  theme(axis.text.x = element_text(angle=45, hjust=1, vjust=1, size=7),
+        legend.position = "bottom", 
+        legend.title = element_text(size = 16), 
+        legend.text = element_text(size = 10),
+        legend.key.size = unit(0.4, "cm"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(colour = "black", size=0.7, fill=NA) ) +
+  labs(title="Boxplot of Metrics (HER2+ ST)", x="",y="",
+       col="",fill="")
+
+p_all_boxplots_her2
+```
+
+#### Supplementary Figure 2
+
+Violin and boxplots of evaluation metrics for gene expression for each method in the CSCC ST dataset
+
+```{r fig.height=12, fig.width=18}
+# Plot Boxplots of Correlations
+pred_gene_msr_df_cscc <- pred_feat_cor_cscc %>%
+  mutate(gene_set = "All Genes") %>%
+  bind_rows(
+    pred_feat_cor_cscc %>%
+      ungroup() %>%
+      filter(gene %in% hv_genes_cscc) %>%
+      mutate(gene_set = "HVGs")
+  ) %>%
+  bind_rows(
+    pred_feat_cor_cscc %>%
+      ungroup() %>%
+      semi_join(svg_genes_cscc, by = c("gene", "img_id")) %>%
+      mutate(gene_set = "SVGs")
+  ) %>%
+  select(gene, pred_type, train_fold, model_id,
+         img_id, cor_pearson, nrmse_sd, js_div, mi, ssim, auc_0,
+         gene_set) %>%
+  # Average image over each patient
+  group_by(gene, pred_type, train_fold, gene_set, model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  # Average all folds and patients over each gene
+  group_by(pred_type, gene, gene_set, model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T))
+
+pred_gene_msr_df_cscc <- pred_gene_msr_df_cscc%>%
+  arrange(factor(model_id, levels=c("ST-Net", "HisToGene", "GeneCodeR", "DeepSpaCE", "DeepPT", "Hist2ST", "EGNv1", "EGNv2", "TCGN", "THItoGene")))
+pred_gene_msr_df_cscc$model_id <- factor(pred_gene_msr_df_cscc$model_id, levels = unique(pred_gene_msr_df_cscc$model_id))
+
+#boxplots of metrics
+p_all_boxplots_cscc <- pred_gene_msr_df_cscc %>%
+  filter(pred_type == "test") %>%
+  pivot_longer(cols=c("cor_pearson", "nrmse_sd", "js_div", "mi", "ssim","auc_0"),
+               names_to="metric",
+               values_to="value") %>%
+  mutate(metric = factor(metric, levels = c("cor_pearson","mi",
+                                            "js_div","nrmse_sd","ssim", "auc_0"))) %>%
+  ggplot() +
+  aes(x=model_id, y=value, fill=model_id, col=model_id) +
+  geom_violin(alpha=0.2) +
+  geom_boxplot(alpha=0.5, width=0.3) +
+  facet_wrap(~gene_set + metric,
+             nrow=3, scales="free") +
+  scale_color_manual(values=dl_method_pal)+
+  scale_fill_manual(values=dl_method_pal)+
+  theme(axis.text.x = element_text(angle=45, hjust=1, vjust=1, size=7),
+        legend.position = "bottom",
+        legend.title = element_text(size = 16), 
+        legend.text = element_text(size = 10),
+        legend.key.size = unit(0.4, "cm"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(colour = "black", size=0.7, fill=NA) ) +
+  labs(title="Boxplot of Metrics (cSCC ST)", x="",y="",
+       col="",fill="")
+
+p_all_boxplots_cscc
+```
+
+#### Supplementary Figure 6 - Visium-Kidney
+
+Violin and boxplots of evaluation metrics for gene expression for each method in the Visium-Kidney dataset
+
+```{r fig.height=20, fig.width=27}
+# Plot Boxplots of Correlations
+pred_gene_msr_df_kidney <- pred_feat_cor_kidney_992 %>%
+  mutate(gene_set = "All Genes") %>%
+  bind_rows(
+    pred_feat_cor_kidney_992 %>%
+      ungroup() %>%
+      filter(gene %in% hv_genes_kidney) %>%
+      mutate(gene_set = "HVGs")
+  ) %>%
+  bind_rows(
+    pred_feat_cor_kidney_992 %>%
+      ungroup() %>%
+      semi_join(svg_kidney, by = c("gene")) %>%
+      mutate(gene_set = "SVGs")
+  ) %>%
+  bind_rows(
+    pred_feat_cor_kidney_992 %>%
+      ungroup() %>%
+      semi_join(pred_feat_cor_kidney_145, by = c("gene", "img_id")) %>%
+      mutate(gene_set = "HSGs")
+  ) %>%
+  select(gene, model_id, train_fold,
+         img_id, cor_pearson, nrmse_sd, js_div, mi, ssim, auc_0,
+         gene_set) %>%
+  # Average images over each patient
+  group_by(gene, train_fold, gene_set, model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  # Average all folds and patients over each gene
+  group_by(gene, gene_set, model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T))
+
+pred_gene_msr_df_kidney <- pred_gene_msr_df_kidney%>%
+  arrange(factor(model_id, levels=c("ST-Net", "HisToGene", "GeneCodeR", "DeepSpaCE", "DeepPT", "Hist2ST", "EGNv1", "EGNv2", "TCGN", "THItoGene")))
+pred_gene_msr_df_kidney$model_id <- factor(pred_gene_msr_df_kidney$model_id, levels = unique(pred_gene_msr_df_kidney$model_id))
+
+#boxplots of metrics
+p_all_boxplots_kidney <- pred_gene_msr_df_kidney %>%
+  #filter(pred_type == "test") %>%
+  pivot_longer(cols=c("cor_pearson", "nrmse_sd", "js_div", "mi", "ssim","auc_0"),
+               names_to="metric",
+               values_to="value") %>%
+  mutate(metric = factor(metric, levels = c("cor_pearson","mi",
+                                            "js_div","nrmse_sd","ssim", "auc_0"))) %>%
+  ggplot() +
+  aes(x=model_id, y=value, fill=model_id, col=model_id) +
+  geom_violin(alpha=0.2) +
+  geom_boxplot(alpha=0.5, width=0.3) +
+  facet_wrap(~gene_set + metric,
+             nrow=4, scales="free") +
+  scale_color_manual(values=dl_method_pal)+
+  scale_fill_manual(values=dl_method_pal)+
+  theme(axis.text.x = element_text(angle=45, hjust=1, vjust=1, size=7),
+        legend.position = "bottom", 
+        legend.title = element_text(size = 16), 
+        legend.text = element_text(size = 10),
+        legend.key.size = unit(0.4, "cm"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(colour = "black", size=0.7, fill=NA) ) +
+  labs(title="Boxplot of Metrics (Visium Kidney)", x="",y="",
+       col="",fill="")
+
+p_all_boxplots_kidney
+```
+
+#### Supplementary Figure 12 - Visium BC (Visium-Hercep-Test2+ for training and Visium-HER2+ for testing)
+
+Violin and boxplots of evaluation metrics for gene expression for each method in the Visium-HER2+ dataset
+
+```{r fig.height=20, fig.width=27}
+#' Plot Boxplots of Correlations
+pred_gene_msr_df_whole_bc <- pred_feat_cor_whole_bc_990 %>%
+  mutate(gene_set = "All Genes") %>%
+  bind_rows(
+    pred_feat_cor_whole_bc_990 %>%
+      ungroup() %>%
+      filter(gene %in% hv_genes_whole_bc) %>%
+      mutate(gene_set = "HVGs")
+  ) %>%
+  bind_rows(
+    pred_feat_cor_whole_bc_990 %>%
+      ungroup() %>%
+      semi_join(svg_bc, by = c("gene", "img_id")) %>%
+      mutate(gene_set = "SVGs")
+  ) %>%
+  bind_rows(
+    pred_feat_cor_whole_bc_990 %>%
+      ungroup() %>%
+      semi_join(pred_feat_cor_whole_bc_274, by = c("gene", "img_id")) %>%
+      mutate(gene_set = "HSGs")
+  ) %>%
+  select(gene, train_fold, model_id,
+         img_id, cor_pearson, nrmse_sd, js_div, mi, ssim, auc_0,
+         gene_set) %>%
+  # Average image over each patient
+  group_by(gene, train_fold, gene_set, model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  # Average all folds and patients over each gene
+  group_by(gene, gene_set, model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T))
+
+pred_gene_msr_df_whole_bc %>%
+  group_by(model_id) %>%
+  summarise_at(vars(c(cor_pearson, mi, ssim, auc_0)), mean)
+
+pred_gene_msr_df_whole_bc <- pred_gene_msr_df_whole_bc%>%
+  arrange(factor(model_id, levels=c("ST-Net", "HisToGene", "GeneCodeR", "DeepSpaCE", "DeepPT", "Hist2ST", "EGNv1", "EGNv2", "TCGN", "THItoGene")))
+pred_gene_msr_df_whole_bc$model_id <- factor(pred_gene_msr_df_whole_bc$model_id, levels = unique(pred_gene_msr_df_whole_bc$model_id))
+
+#boxplots of metrics
+p_all_boxplots_whole_bc <- pred_gene_msr_df_whole_bc %>%
+  #filter(pred_type == "test") %>%
+  pivot_longer(cols=c("cor_pearson", "nrmse_sd", "js_div", "mi", "ssim","auc_0"),
+               names_to="metric",
+               values_to="value") %>%
+  mutate(metric = factor(metric, levels = c("cor_pearson","mi",
+                                            "js_div","nrmse_sd","ssim", "auc_0"))) %>%
+  ggplot() +
+  aes(x=model_id, y=value, fill=model_id, col=model_id) +
+  geom_violin(alpha=0.2) +
+  geom_boxplot(alpha=0.5, width=0.3) +
+  facet_wrap(~gene_set + metric,
+             nrow=4, scales="free") +
+  scale_color_manual(values=dl_method_pal)+
+  scale_fill_manual(values=dl_method_pal)+
+  theme(axis.text.x = element_text(angle=45, hjust=1, vjust=1, size=7),
+        legend.position = "bottom", 
+        legend.title = element_text(size = 16), 
+        legend.text = element_text(size = 10),
+        legend.key.size = unit(0.4, "cm"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(colour = "black", size=0.7, fill=NA) ) +
+  labs(title="Boxplot of Metrics (Visium-HER2+)", x="",y="",
+       col="",fill="")
+
+p_all_boxplots_whole_bc
+```
+
+#### Figure 3a
+
+PCC and SSIM violin and boxplots for each method in HER2+ dataset for all genes as well as for HVGs only. Significance between HVGs and all genes are calculated using Wilcoxon rank-sum test
+
+```{r fig.height=8, fig.width=14}
+pred_cor_hvg_df <- pred_gene_msr_df %>%
+  filter(pred_type == "test") %>%
+  pivot_longer(cols=c("cor_pearson","ssim"),
+               names_to="metric",
+               values_to="value") %>%
+  mutate(metric = factor(metric, levels = c("cor_pearson","ssim"))) %>%
+  mutate(metric=ifelse(metric=="ssim","SSIM",
+                       ifelse(metric=="cor_pearson","PCC",metric)))
+
+sigFunc <- function(test_result, group) {
+  if (test_result$p.value < 0.001) {
+    signif <- "***"
+  } else if (test_result$p.value < 0.01) {
+    signif <- "**"
+  } else if (test_result$p.value < 0.05) {
+    signif <- "*"
+  } else if (test_result$p.value < 0.1) {
+    signif <- "\u00b0"
+  } else {
+    signif <- NA
+  }
+
+  stat_report <- paste0(
+    "italic(p[", group, "]) == ", sprintf("%.2g", test_result$p.value)
+  )
+
+  list(signif = signif, stat_report = stat_report)
+}
+
+ptest_HVG <- pred_cor_hvg_df %>%
+  filter(gene_set %in% c("All Genes", "HVGs")) %>%
+  group_by(pred_type, model_id, metric) %>%
+  do({
+    test_result <- wilcox.test(value ~ gene_set, data = ., alternative = "less")
+    sig <- sigFunc(test_result, group = "hvg")
+    data.frame(
+      signif = sig$signif,
+      stat_report = sig$stat_report,
+      xmin = "All Genes",
+      xmax = "HVGs",
+      max_val = max(.$value)
+    )
+  })
+
+ptest_SVG <- pred_cor_hvg_df %>%
+  filter(gene_set %in% c("All Genes", "SVGs")) %>%
+  group_by(pred_type, model_id, metric) %>%
+  do({
+    test_result <- wilcox.test(value ~ gene_set, data = ., alternative = "less")
+    sig <- sigFunc(test_result, group = "svg")
+    data.frame(
+      signif = sig$signif,
+      stat_report = sig$stat_report,
+      xmin = "All Genes",
+      xmax = "SVGs",
+      max_val = max(.$value)
+    )
+  })
+
+p_hvg_cor_ssim <- pred_cor_hvg_df %>%
+  ggplot() +
+  aes(x = gene_set,
+      y = value,
+      fill = gene_set,
+      col = gene_set) +
+  geom_violin(alpha = 0.2,
+              width = 1,
+              position = position_dodge(width = 0.6)) +
+  geom_boxplot(alpha = 0.5,
+               width = 0.3,
+               position = position_dodge(width = 0.6)) +
+  scale_color_manual(values = c("All Genes" = "#4393C3", "HVGs" = "#009E73", "SVGs" = "#f6b000")) +
+  scale_fill_manual(values = c("All Genes" = "#4393C3", "HVGs" = "#009E73", "SVGs" = "#f6b000")) +
+  
+  geom_signif(
+    aes(
+      xmin = xmin,
+      xmax = xmax,
+      y_position = max_val + max_val / 10,
+      annotations = signif
+    ),
+    color = "grey70",
+    textsize = 5.5,
+    vjust = 1.5,
+    margin_top = 0.15,
+    data = ptest_HVG,
+    manual = TRUE,
+    inherit.aes = FALSE
+  ) +
+  geom_signif(
+    aes(
+      xmin = xmin,
+      xmax = xmax,
+      y_position = max_val + max_val / 4.5,
+      annotations = signif
+    ),
+    color = "grey40",
+    textsize = 5.5,
+    vjust = 1.5,
+    margin_top = 0.15,
+    data = ptest_SVG,
+    manual = TRUE,
+    inherit.aes = FALSE
+  ) +
+  geom_text(
+    aes(
+      x = as.numeric(factor(xmin)) + 0.9,
+      y = -0.13,
+      label = stat_report
+    ),
+    data = ptest_HVG,
+    inherit.aes = FALSE,
+    size = 2.3, 
+    parse = TRUE,
+    color = "grey20" 
+  ) +
+  geom_text(
+    aes(
+      x = as.numeric(factor(xmax)) + 0.9, 
+      y = -0.17, 
+      label = stat_report
+    ),
+    data = ptest_SVG,
+    inherit.aes = FALSE,
+    size = 2.3,
+    parse = TRUE,
+    color = "grey20"
+  ) +
+  facet_grid(cols = vars(model_id), rows = vars(metric),
+             switch = "y") +
+  theme(
+    legend.position = "bottom",
+    strip.placement = "outside",
+    axis.ticks.x = element_blank(),
+    axis.text.x = element_blank(),
+    strip.text.x = element_text(size = 14),
+    strip.text.y = element_text(size = 15),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+  ) +
+  labs(x = "", y = "",
+       col = "Gene Set", fill = "Gene Set")
+
+p_hvg_cor_ssim
+```
+
+#### Correlation - Results for top genes
+
+Top five correlated genes in the HER2+ ST and CSCC dataset
+
+```{r fig.height=3.5, fig.width=5}
+# Get top genes in her2+
+top_cor_df <- pred_feat_cor %>%
+  filter(pred_type=="test") %>% 
+  mutate(dataset="her2+") %>%
+  group_by(gene, model_id, dataset) %>%
+  summarise(mean_cor = mean(cor_pearson, na.rm=T),.groups="drop") %>%
+  pivot_wider(names_from = "model_id", values_from="mean_cor") %>%
+  rowwise() %>% 
+  mutate(overall_mean_cor = mean(c_across(-c(gene, dataset)))) %>%
+  arrange(dataset,-overall_mean_cor) %>%
+  ungroup()
+
+# Get top genes in cscc
+top_cor_df_cscc <- pred_feat_cor_cscc %>%
+  filter(pred_type=="test") %>% 
+  mutate(dataset="cscc") %>%
+  group_by(gene, model_id, dataset) %>%
+  summarise(mean_cor = mean(cor_pearson, na.rm=T),.groups="drop") %>%
+  pivot_wider(names_from = "model_id", values_from="mean_cor") %>%
+  rowwise() %>% 
+  mutate(overall_mean_cor = mean(c_across(-c(gene, dataset)))) %>%
+  arrange(dataset,-overall_mean_cor) %>%
+  ungroup()
+```
+
+#### Figure 3b
+
+```{r fig.height=4, fig.width=8}
+# Plot top genes her2+
+plotTopGenesBar <- function(top_cor_df) {
+  top_cor_df %>%
+    group_by(dataset) %>%
+    dplyr::slice(1:5) %>%
+    mutate(gene = factor(gene, levels=rev(gene))) %>%
+    pivot_longer(cols=!c("gene", "overall_mean_cor", "dataset"),
+                 names_to="model_id",
+                 values_to="cor")  %>% 
+    ggplot() +
+    aes(x=gene,y=cor,col=model_id,fill=model_id)+
+    geom_bar(stat="identity", position=position_dodge(),
+             alpha=0.6, width=0.75) +
+    geom_text(data=. %>%
+                distinct(gene, overall_mean_cor),
+              aes(x=gene, 
+                  label = round(overall_mean_cor,2), 
+                  y=Inf),
+              size = 5, 
+              hjust=1.1,
+              inherit.aes = F)+
+    facet_wrap(~dataset, scales="free")+
+    scale_y_continuous(expand = c(0, Inf)) +
+    scale_color_manual(values=dl_method_pal)+
+    scale_fill_manual(values=dl_method_pal)+
+    coord_flip()+
+    labs(y="Mean PCC", x="")
+}
+
+th <- theme(text=element_text(size=14),
+                axis.text.x = element_text(size = 13, angle = 0, hjust = 0),
+                axis.text.y = element_text(size = 13, angle = 0, hjust = 0),
+                strip.text = element_text(size = 16),
+                panel.grid.major = element_blank(),
+                panel.grid.minor = element_blank(),
+                panel.background = element_rect(colour = "black", size=0.7, fill=NA) )
+
+p_topgenes_her2 <- plotTopGenesBar(top_cor_df %>%
+                                     mutate(dataset = ifelse(dataset=="her2+", "HER2+ ST", dataset))) +
+                   th
+
+p_topgenes_her2
+```
+
+#### Figure 3c
+
+```{r fig.height=5, fig.width=7}
+p_topgenes_cscc <- plotTopGenesBar(top_cor_df_cscc %>%
+                                     mutate(dataset = ifelse(dataset=="cscc", "cSCC ST", dataset))) + 
+  theme(plot.title = element_text(size = 14, face = "bold"),
+        legend.position="bottom",
+        legend.text = element_text(size=14),
+    legend.key.size = unit(14, 'points'),
+    legend.title = element_text(size=13),
+    strip.text.x = element_text(size=14)) +
+  labs(col="",fill="") +
+  th
+
+p_topgenes_cscc
+```
+
+#### AUC vs. threshold - Figure 3d
+
+Plot of the AUC (averaged over each gene) of the predicted gene expression distinguishing a binarisation of the ground truth gene expression. Ground truth is binarised according to whether the value was greater than or equal to several thresholds (x-axis).
+
+```{r fig.height=4, fig.width=6}
+#' Plot AUC 
+pred_n_auc <- pred_feat_cor %>%
+  mutate(gene_set = "All Genes") %>%
+  bind_rows(
+    pred_feat_cor %>%
+      ungroup() %>%
+      filter(gene %in% hv_genes) %>%
+      mutate(gene_set = "HVGs")
+  ) %>%
+  select(-starts_with(c("cor", "var", "mean","nrmse")), -c("js_div", "mi", "rmse")) %>%
+  pivot_longer(cols=starts_with("auc"),
+               names_to="metric", values_to="auc") %>%
+  mutate(gene_count_threshold = gsub("auc_", "", metric)) %>%
+  mutate(pat_id = substr(img_id, 1,1)) %>%
+  # Average over each image
+  group_by(pat_id, gene, pred_type, train_fold, gene_set, model_id, gene_count_threshold) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  # Average over all genes
+  group_by(pred_type, train_fold, gene_set, model_id, gene_count_threshold) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  # Average the over each fold
+  group_by(pred_type, gene_set, model_id, gene_count_threshold) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T))
+
+p_auc_thresh <- pred_n_auc %>% 
+  filter(gene_set == "All Genes") %>%
+  mutate(gene_count_threshold = as.numeric(gene_count_threshold)) %>% 
+  arrange(pred_type, gene_set, model_id, gene_count_threshold) %>%
+  filter(pred_type == "test") %>%
+  ggplot() +
+  aes(x=gene_count_threshold, y=auc, col=model_id) +
+  geom_point() +
+  geom_path() +
+  th + 
+  labs(y="Mean AUC", x="Gene Count Threshold",
+       col="Method")+
+  scale_color_manual(values=dl_method_pal)
+
+p_auc_thresh
+```
+
+#### Heatmap of gene correlations
+
+```{r}
+hm_dat <- pred_feat_cor %>%
+  filter(pred_type == "test") %>% 
+  group_by(gene, pred_type, model_id) %>%
+  summarise(mean_cor_pearson = mean(cor_pearson, na.rm=T)) %>%
+  pivot_wider(names_from="gene",
+              values_from="mean_cor_pearson") %>%
+  ungroup()
+
+hm_mat <- hm_dat %>%
+  select(-c(pred_type, model_id)) %>%
+  as.matrix()
+
+rownames(hm_mat) = hm_dat$model_id
+
+col_fun = colorRamp2(
+  c(min(hm_mat, na.rm=T), 0.1, max(hm_mat, na.rm=T)), 
+  c("#66a6cc", "#fff8de", "#cc2010"))
+
+ha_dat <- data.frame(
+      mean_exprs = colMeans(deeppt_exprs_df %>% select(-X)),
+      gene = colnames(deeppt_exprs_df %>% select(-X)),
+      var_exprs = apply(deeppt_exprs_df %>% select(-X),2,var),
+      sd_exprs = apply(deeppt_exprs_df %>% select(-X),2,sd)
+    ) %>%
+  mutate(hvg = gene %in% hv_genes,
+         cv_exprs = sd_exprs/mean_exprs*100) %>%
+  arrange(gene)
+
+row_dend = dendsort(hclust(dist(hm_mat)), type="average")
+col_dend = dendsort(hclust(dist(t(hm_mat))), type="average")
+```
+
+#### Check Variance of original & Normalisation - Supplementary Figure 5b
+
+Scatterplot of gene expression variance before (x-axis) and after normalisation (y-axis) for each method.
+
+```{r}
+#' Plot Boxplots of Correlations
+pred_gene_msr_df <- pred_feat_cor %>%
+  mutate(gene_set = "All Genes") %>%
+  select(gene, pred_type, train_fold, model_id,
+         img_id, var_exprs, var_exprs_orig, mean_exprs, mean_exprs_orig,
+         cor_pearson,ssim,
+         gene_set) %>%
+  # Average image over each patient
+  group_by(gene, pred_type, train_fold, gene_set, model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  # Average all folds and patients over each gene
+  group_by(pred_type, gene, gene_set, model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T))
+
+pred_gene_msr_df <- pred_gene_msr_df%>%
+  arrange(factor(model_id, levels=c("ST-Net", "HisToGene", "GeneCodeR", "DeepSpaCE", "DeepPT", "Hist2ST", "EGNv1", "EGNv2", "TCGN", "THItoGene", "iStar")))
+pred_gene_msr_df$model_id <- factor(pred_gene_msr_df$model_id, levels = unique(pred_gene_msr_df$model_id))
+
+pred_gene_msr_df %>%
+  filter(pred_type == "test") %>%
+  ggplot() +
+  aes(y=log(var_exprs), x=log(var_exprs_orig)) +
+  geom_point(size=1)+
+  facet_wrap(~model_id,
+             nrow=3, scales="free") +
+  theme(strip.text.x = element_text(size = 10),
+        strip.text.y = element_text(size = 10),
+        axis.text.x = element_text(angle=25, hjust=1, vjust=1),
+        legend.position = "bottom") + 
+  th + 
+  labs(x="log(GE Variance)", y="log(Normalised GE Variance)")
+```
+
+#### Investigate genes in heatmap - Supp Figure 5c
+
+Scatterplot of average correlation difference between average correlation of both DeepPT/ST-Net & average correlation of both HisToGene/Hist2ST and the correlation between ground truth and normalisation (y-axis). Each point represents a gene.
+
+```{r, fig.height=4, fig.width=5}
+# Hypothesis: Genes performing bad are when normalized expression different from 
+# ground truth
+filt_gene_df <- comb_pred_dat %>%
+  filter(pred_type == "train" & train_fold == 2) %>%
+  filter(model_id %in% c("DeepPT", "Hist2ST")) %>%
+  mutate(model_id = ifelse(model_id == "DeepPT", 
+                           "Ground Truth", "NormalisedGE")) %>%
+  select(-pred,-row_id) %>%
+  pivot_wider(names_from="model_id", values_from="exprs") %>%
+  separate("patch_id",
+           c("img_id", "patch_coord"),
+           sep = "_",
+           remove = FALSE) %>%
+  separate("patch_coord", c("x", "y"), sep = "x") %>%
+  mutate_at(c("x", "y"), as.numeric)
+
+gt_norm_cor <- filt_gene_df %>%
+  group_by(gene,img_id,pred_type,train_fold) %>%
+  summarise(cor = cor(`Ground Truth`, `NormalisedGE`,use="pairwise.complete.obs")) %>%
+  group_by(gene) %>%
+  summarise(mean_cor = mean(cor,na.rm=T))
+
+# Normalisation changes of spatial gene expression gives rise to difference in correlation
+# result 
+hm_dat %>% 
+  pivot_longer(cols=!c("model_id","pred_type"),
+               names_to="gene",
+               values_to="cor") %>%
+  mutate(grp = case_when(
+    model_id %in% c("DeepPT", "ST-Net") ~ 1,
+    model_id %in% c("Hist2ST", "HisToGene") ~ 2, 
+    TRUE ~ NA
+  )) %>%
+  filter(!is.na(grp)) %>%
+  group_by(gene, grp) %>%
+  summarise(grp_mean_cor = mean(cor)) %>%
+  pivot_wider(names_from="grp", values_from="grp_mean_cor") %>%
+  mutate(cor_diff = `1`-`2`) %>%
+  left_join(gt_norm_cor,by="gene") %>%
+  ggplot() + 
+  aes(x=cor_diff, y=mean_cor)+
+  geom_point(alpha=0.6) +
+  geom_smooth(method="lm")+
+  th +
+  theme(axis.title.x = element_text(size=12),
+        axis.title.y = element_text(size=12)) +
+  labs(y="Correlation between Ground Truth GE and Normalised GE",
+       x="Average Cor. Diff between DeepPT/ST-Net & HistToGene/Hist2ST")
+```
+
+#### Figure 3e
+
+Heatmap of average correlation of each gene in HER2+ ST dataset and each method. The log of the mean and variance of each gene are coloured above the heatmap.
+
+```{r fig.height=5, fig.width=10}
+# Check which cluster contains which genes
+ha_dat <- ha_dat %>%
+  arrange(desc(mean_exprs))
+
+ha = HeatmapAnnotation(
+  `log(mean)` = log10(ha_dat$mean_exprs),
+  `log(var)` = log10(ha_dat$var_exprs),
+  annotation_name_side = "left",
+  col = list(
+    `log(mean)` = colorRamp2(c(min(log10(ha_dat$mean_exprs)), max(log10(ha_dat$mean_exprs))), 
+                          c( "white", "#004444")),
+    `log(var)` = colorRamp2(c(min(log10(ha_dat$var_exprs)), max(log10(ha_dat$var_exprs))), 
+                          c( "white", "#ce3b39"))
+  ),
+  show_legend = c(TRUE, TRUE, FALSE, FALSE,FALSE,FALSE,FALSE),
+  annotation_legend_param = list(
+    `log(mean)` = list(direction = "horizontal"),
+    `log(var)` = list(direction = "horizontal")
+    )
+)
+
+#pdf("/dskh/nobackup/chuhanw/Benchmarking-HE-ST/accept_figures/fig_3e.pdf", width = 16, height = 9)
+
+p_heatmap <- Heatmap(
+  hm_mat,
+  col = col_fun,
+  column_labels = rep("", ncol(hm_mat)),
+  name = "Average Correlation",
+  # column_title = "Gene",
+  top_annotation = ha,
+  heatmap_legend_param = list(direction = "horizontal"),
+  row_names_gp = gpar(fontsize = 16)
+  #cluster_columns = FALSE
+)
+   
+p_heatmap_botleg <- draw(p_heatmap, 
+     merge_legend = TRUE, 
+     heatmap_legend_side = "bottom", 
+     annotation_legend_side = "bottom"
+     ) 
+#dev.off()
+```
+
+#### Figure 3f - Visium-Kidney 
+
+PCC violin and boxplots for each method in Visium-Kidney dataset for all genes as well as for HVGs, SVGs and HSGs only. Significance between HVGs, SVGs, HSGs and all genes are calculated using Wilcoxon rank-sum test
+
+```{r fig.height=4, fig.width=11}
+pred_cor_hvg_df_kidney <- pred_gene_msr_df_kidney %>%
+  pivot_longer(cols=c("cor_pearson"), 
+               names_to="metric",
+               values_to="value") %>%
+  mutate(metric = factor(metric, levels = c("cor_pearson"))) %>%
+  mutate(metric=ifelse(metric=="ssim","SSIM",
+                       ifelse(metric=="cor_pearson","PCC",metric)))
+
+sigFunc <- function(test_result, group) {
+  if (test_result$p.value < 0.001) {
+    signif <- "***"
+  } else if (test_result$p.value < 0.01) {
+    signif <- "**"
+  } else if (test_result$p.value < 0.05) {
+    signif <- "*"
+  } else if (test_result$p.value < 0.1) {
+    signif <- "\u00b0"
+  } else {
+    signif <- NA
+  }
+
+  stat_report <- paste0(
+    "italic(p[", group, "]) == ", sprintf("%.2g", test_result$p.value)
+  )
+
+  list(signif = signif, stat_report = stat_report)
+}
+
+ptest_HVG <- pred_cor_hvg_df_kidney %>%
+  filter(gene_set %in% c("All Genes", "HVGs")) %>%
+  group_by(model_id, metric) %>%
+  do({
+    test_result <- wilcox.test(value ~ gene_set, data = ., alternative="less")
+    sig <- sigFunc(test_result, group = "hvg")
+    data.frame(
+      signif = sig$signif,
+      stat_report = sig$stat_report,
+      xmin = "All Genes",
+      xmax = "HVGs",
+      max_val = max(.$value)
+    )
+  })
+
+ptest_SVG <- pred_cor_hvg_df_kidney %>%
+  filter(gene_set %in% c("All Genes", "SVGs")) %>%
+  group_by(model_id, metric) %>%
+  do({
+    test_result <- wilcox.test(value ~ gene_set, data = ., alternative = "less")
+    sig <- sigFunc(test_result, group = "svg")
+    data.frame(
+      signif = sig$signif,
+      stat_report = sig$stat_report,
+      xmin = "All Genes",
+      xmax = "SVGs",
+      max_val = max(.$value)
+    )
+  })
+
+ptest_sparse <- pred_cor_hvg_df_kidney %>%
+  filter(gene_set %in% c("All Genes", "HSGs")) %>%
+  group_by(model_id, metric) %>%
+  do({
+    test_result <- wilcox.test(value ~ gene_set, data = ., alternative = "less")
+    sig <- sigFunc(test_result, group = "hsg") 
+    data.frame(
+      signif = sig$signif,
+      stat_report = sig$stat_report,
+      xmin = "All Genes",
+      xmax = "HSGs",
+      max_val = max(.$value)
+    )
+  })
+
+desired_order <- c("All Genes", "HVGs", "SVGs", "HSGs")
+pred_cor_hvg_df_kidney <- pred_cor_hvg_df_kidney %>%
+  mutate(gene_set = factor(gene_set, levels = desired_order))
+
+kidney_p_hvg_cor <- pred_cor_hvg_df_kidney %>%
+  ggplot() +
+  aes(x = gene_set,
+      y = value,
+      fill = gene_set,
+      col = gene_set) +
+  geom_violin(alpha = 0.2,
+              width = 1, 
+              position = position_dodge(width = 0.5)) +
+  geom_boxplot(alpha = 0.5,
+               width = 0.3, 
+               position = position_dodge(width = 0.5)) +
+  scale_color_manual(values = c("All Genes" = "#4393C3", "HVGs" = "#009E73", "SVGs" = "#f6b000", "HSGs" = "#ee8227")) + 
+  scale_fill_manual(values = c("All Genes" = "#4393C3", "HVGs" = "#009E73", "SVGs" = "#f6b000", "HSGs" = "#ee8227")) +
+  geom_signif(
+    aes(
+      xmin = xmin,
+      xmax = xmax,
+      y_position = max_val + max_val / 10,
+      annotations = signif
+    ),
+    color = "grey70",
+    textsize = 4.5,
+    vjust = 1.5,
+    margin_top = 0.15,
+    data = ptest_HVG,
+    manual = TRUE,
+    inherit.aes = FALSE
+  ) +
+  geom_signif(
+    aes(
+      xmin = xmin,
+      xmax = xmax,
+      y_position = max_val + max_val / 4.5,
+      annotations = signif
+    ),
+    color = "grey40",
+    textsize = 4.5,
+    vjust = 1.5,
+    margin_top = 0.15,
+    data = ptest_SVG,
+    manual = TRUE,
+    inherit.aes = FALSE
+  ) +
+  geom_signif(
+    aes(
+      xmin = xmin,
+      xmax = xmax,
+      y_position = max_val + max_val / 4.5,
+      annotations = signif
+    ),
+    color = "grey20",
+    textsize = 4.5,
+    vjust = 1.5,
+    margin_top = 0.15,
+    data = ptest_sparse,
+    manual = TRUE,
+    inherit.aes = FALSE
+  ) + 
+  geom_text(
+    aes(
+      x = as.numeric(factor(xmin)) + 1.6,
+      y = -0.14,
+      label = stat_report
+    ),
+    data = ptest_HVG,
+    inherit.aes = FALSE,
+    size = 2.5, 
+    parse = TRUE, 
+    color = "grey20" 
+  ) +
+  geom_text(
+    aes(
+      x = as.numeric(factor(xmax)) + 1.6, 
+      y = -0.17, 
+      label = stat_report
+    ),
+    data = ptest_SVG,
+    inherit.aes = FALSE,
+    size = 2.5,
+    parse = TRUE, 
+    color = "grey20"
+  ) +
+  geom_text(
+    aes(
+      x = as.numeric(factor(xmax)) + 1.6, 
+      y = -0.20, 
+      label = stat_report
+    ),
+    data = ptest_sparse,
+    inherit.aes = FALSE,
+    size = 2.5,
+    parse = TRUE, 
+    color = "grey20"
+    ) +
+  facet_grid(cols=vars(model_id),rows=vars(metric),
+             switch="y") +
+  theme(
+    legend.position = "bottom",
+    strip.placement = "outside",
+    axis.ticks.x=element_blank(),
+    axis.text.x=element_blank(),
+    strip.text.x = element_text(size = 14),
+    strip.text.y = element_text(size = 16),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+  ) +
+  labs(x="",y="",
+       col="Gene Set",fill="Gene Set")
+
+kidney_p_hvg_cor
+```
+
+#### Figure 3g - Visium-HER2+
+
+PCC violin and boxplots for each method in Visium-HER2+ dataset for all genes as well as for HVGs, SVGs and HSGs only. Significance between HVGs, SVGs, HSGs and all genes are calculated using Wilcoxon rank-sum test
+
+```{r fig.height=4, fig.width=11}
+pred_cor_hvg_df_whole_bc <- pred_gene_msr_df_whole_bc %>%
+  pivot_longer(cols="cor_pearson",
+               names_to="metric",
+               values_to="value") %>%
+  mutate(metric = factor(metric, levels = "cor_pearson")) %>%
+  mutate(metric=ifelse(metric=="ssim","SSIM",
+                       ifelse(metric=="cor_pearson","PCC",metric)))
+
+sigFunc <- function(test_result, group) {
+  if (test_result$p.value < 0.001) {
+    signif <- "***"
+  } else if (test_result$p.value < 0.01) {
+    signif <- "**"
+  } else if (test_result$p.value < 0.05) {
+    signif <- "*"
+  } else if (test_result$p.value < 0.1) {
+    signif <- "\u00b0"
+  } else {
+    signif <- NA
+  }
+
+  stat_report <- paste0(
+    "italic(p[", group, "]) == ", sprintf("%.2g", test_result$p.value)
+  )
+
+  list(signif = signif, stat_report = stat_report)
+}
+
+ptest_HVG <- pred_cor_hvg_df_whole_bc %>%
+  filter(gene_set %in% c("All Genes", "HVGs")) %>%
+  group_by(model_id,metric)  %>%
+  do({
+    test_result <- wilcox.test(value ~ gene_set, data = ., alternative = "less")
+    sig <- sigFunc(test_result, group = "hvg")
+    data.frame(
+      signif = sig$signif,
+      stat_report = sig$stat_report,
+      xmin = "All Genes",
+      xmax = "HVGs",
+      max_val = max(.$value)
+    )
+  })
+
+ptest_SVG <- pred_cor_hvg_df_whole_bc %>%
+  filter(gene_set %in% c("All Genes", "SVGs")) %>%
+  group_by(model_id,metric)  %>%
+  do({
+    test_result <- wilcox.test(value ~ gene_set, data = ., alternative = "less")
+    sig <- sigFunc(test_result, group = "svg")
+    data.frame(
+      signif = sig$signif,
+      stat_report = sig$stat_report,
+      xmin = "All Genes",
+      xmax = "SVGs",
+      max_val = max(.$value)
+    )
+  })
+
+ptest_sparse <- pred_cor_hvg_df_whole_bc %>%
+  filter(gene_set %in% c("All Genes", "HSGs")) %>%
+  group_by(model_id,metric)  %>%
+  do({
+    test_result <- wilcox.test(value ~ gene_set, data = ., alternative = "less")
+    sig <- sigFunc(test_result, group = "hsg")
+    data.frame(
+      signif = sig$signif,
+      stat_report = sig$stat_report,
+      xmin = "All Genes",
+      xmax = "HSGs",
+      max_val = max(.$value)
+    )
+  })
+
+desired_order <- c("All Genes", "HVGs", "SVGs", "HSGs")
+pred_cor_hvg_df_whole_bc <- pred_cor_hvg_df_whole_bc %>%
+  mutate(gene_set = factor(gene_set, levels = desired_order))
+
+whole_bc_p_hvg_cor <- pred_cor_hvg_df_whole_bc %>%
+  ggplot() +
+  aes(x = gene_set,
+      y = value,
+      fill = gene_set,
+      col = gene_set) +
+  geom_violin(alpha = 0.2,
+              width = 1,
+              position = position_dodge(width = 0.6)) +
+  geom_boxplot(alpha = 0.5,
+               width = 0.3,
+               position = position_dodge(width = 0.6)) +
+  scale_color_manual(values = c("All Genes" = "#4393C3", "HVGs" = "#009E73", "SVGs" = "#f6b000", "HSGs" = "#ee8227")) + 
+  scale_fill_manual(values = c("All Genes" = "#4393C3", "HVGs" = "#009E73", "SVGs" = "#f6b000", "HSGs" = "#ee8227")) +
+    geom_signif(
+    aes(
+      xmin = xmin,
+      xmax = xmax,
+      y_position = max_val + max_val / 10,
+      annotations = signif
+    ),
+    color = "grey70",
+    textsize = 4.5,
+    vjust = 1.5,
+    margin_top = 0.15,
+    data = ptest_HVG,
+    manual = TRUE,
+    inherit.aes = FALSE
+  ) +
+  geom_signif(
+    aes(
+      xmin = xmin,
+      xmax = xmax,
+      y_position = max_val + max_val / 4.5,
+      annotations = signif
+    ),
+    color = "grey40",
+    textsize = 4.5,
+    vjust = 1.5,
+    margin_top = 0.15,
+    data = ptest_SVG,
+    manual = TRUE,
+    inherit.aes = FALSE
+  ) +
+  geom_signif(
+    aes(
+      xmin = xmin,
+      xmax = xmax,
+      y_position = max_val + max_val / 4.5,
+      annotations = signif
+    ),
+    color = "grey20",
+    textsize = 4.5,
+    vjust = 1.5,
+    margin_top = 0.15,
+    data = ptest_sparse,
+    manual = TRUE,
+    inherit.aes = FALSE
+  ) + 
+  geom_text(
+    aes(
+      x = as.numeric(factor(xmin)) + 1.6,
+      y = -0.30,
+      label = stat_report
+    ),
+    data = ptest_HVG,
+    inherit.aes = FALSE,
+    size = 2.5, 
+    parse = TRUE, 
+    color = "grey20" 
+  ) +
+  geom_text(
+    aes(
+      x = as.numeric(factor(xmax)) + 1.6, 
+      y = -0.33, 
+      label = stat_report
+    ),
+    data = ptest_SVG,
+    inherit.aes = FALSE,
+    size = 2.5,
+    parse = TRUE, 
+    color = "grey20"
+  ) +
+  geom_text(
+    aes(
+      x = as.numeric(factor(xmax)) + 1.6, 
+      y = -0.36, 
+      label = stat_report
+    ),
+    data = ptest_sparse,
+    inherit.aes = FALSE,
+    size = 2.5,
+    parse = TRUE, 
+    color = "grey20"
+    ) +
+  facet_grid(cols=vars(model_id),rows=vars(metric),
+             switch="y") +
+  theme(
+    legend.position = "bottom",
+    strip.placement = "outside",
+    axis.ticks.x=element_blank(),
+    axis.text.x=element_blank(),
+    strip.text.x = element_text(size = 14),
+    strip.text.y = element_text(size = 16),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+  ) +
+  labs(x="",y="",
+       col="Gene Set",fill="Gene Set")
+
+whole_bc_p_hvg_cor
+```
+
+#### Supplementary Figure 3 - HER2+ Clustering 
+
+```{r, fig.height=2, fig.width=16}
+# do one sample each time
+# load K-means clustering results
+df_clustered_comb <- readRDS("./data/processed/her2st/her2st_cluster_11.rds")
+desired_order <- c(
+  "Ground Truth Annotation", "Ground Truth SGE", "ST-Net", "HisToGene", "GeneCodeR", "DeepSpaCE",
+  "DeepPT", "Hist2ST", "EGNv1", "EGNv2", "TCGN", "THItoGene", "iStar"
+)
+cluster_sample <- df_clustered_comb %>%
+  filter(img_id == "B1") %>% #choose image sample here
+  separate("patch_id",
+           c("img_id", "patch_coord"),
+           sep = "_",
+           remove = FALSE) %>%
+  separate("patch_coord", c("x", "y"), sep = "x")
+
+cluster_sample <- cluster_sample %>%
+  mutate(model_id = case_when(
+  model_id == "genecoder_i500_j500" ~ "GeneCodeR",
+  TRUE ~ model_id
+  )) %>%
+  bind_rows(
+    cluster_sample %>%
+      filter(model_id == "DeepPT") %>%
+      mutate(cluster = gt_cluster) %>%
+      mutate(model_id = "Ground Truth Annotation")
+  ) %>%
+    bind_rows(
+    cluster_sample %>%
+      filter(model_id == "DeepPT") %>%
+      mutate(cluster = cluster_observed) %>%
+      mutate(model_id = "Ground Truth SGE")
+  ) %>%
+  mutate_at(c("x", "y"), as.numeric) %>%
+  group_by(model_id)
+
+#Calculate ARIs
+ari_per_model <- cluster_sample %>%
+  group_by(model_id) %>%
+  summarise(ari = adjustedRandIndex(cluster, gt_cluster)) %>%
+  ungroup() %>%
+  mutate(model_label = paste0(as.character(model_id), "\nARI=", round(ari, 3))) %>%
+  mutate(model_label = factor(model_label, levels = model_label[order(factor(model_id, levels = desired_order))])) %>%
+  arrange(factor(model_id, levels = desired_order))
+
+cluster_sample$model_id <- factor(cluster_sample$model_id, levels = desired_order)
+
+fig_region_cluster <- cluster_sample %>%
+  mutate(cluster = as.factor(cluster))%>%
+  left_join(ari_per_model %>% select(model_id, model_label), by = "model_id") %>%
+  mutate(model_label = factor(model_label, levels = ari_per_model$model_label)) %>%
+  mutate(model_id = factor(
+    model_id,
+    levels = c(
+      "DeepPT","DeepSpaCE",
+      "EGNv1", "EGNv2", "TCGN", "THItoGene", "iStar",
+      "GeneCodeR","Hist2ST","HisToGene","ST-Net", "Ground Truth Annotation", "Ground Truth SGE"
+    )
+  )) %>%
+ggplot() +
+  aes(x = x, y = -y, color = cluster) +
+  geom_point(size = 0.88) +
+  facet_wrap(~ model_label, scales = "free", ncol = 13) +
+  scale_color_viridis_d() +
+  labs(color = "Cluster", x = "", y = "") +
+  theme(
+    axis.ticks = element_blank(),
+    axis.text = element_blank(),
+    axis.line = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.text = element_text(size = 10),
+    legend.key.size = unit(15, 'points'),
+    legend.title = element_text(size = 12),
+    strip.text.x = element_text(size = 12)
+  ) 
+
+fig_region_cluster
+```
+
+####  % Zero vs Cor - Supplementary Figure 4
+
+Gene expression prediction evaluation metrics vs. the percentage of zeros in each gene for each method. Linear lines of best fit are plotted for each.
+
+```{r fig.height=14, fig.width=24}
+exprs_perc_zero_df <- deeppt_exprs_df %>%
+  rename(patch_id = X) %>%
+  pivot_longer(cols = !c("patch_id"),
+               names_to = "gene",
+               values_to = "exprs") %>%
+  separate(
+      patch_id ,
+      into = c("img_id", "x_y"),
+      sep = "_",
+      convert = TRUE,
+      remove=FALSE
+    ) %>%
+  separate(x_y, into = c("x", "y"), sep = "x") %>%
+  group_by(img_id, gene) %>%
+  summarise(perc_zero = mean(exprs==0), .groups="drop")
+
+exprs_perc_zero_metric_df <- pred_feat_cor %>%
+  filter(pred_type=="test") %>%
+  left_join(
+    exprs_perc_zero_df,
+    by=c("img_id","gene")
+  ) %>%
+  group_by(gene, model_id, pred_type) %>%
+  summarise_if(is.numeric, function(col) mean(col, na.rm=T)) %>%
+  pivot_longer(
+    cols=c("cor_pearson","mi","nrmse_sd","ssim","auc_0"),
+    names_to="metric",
+    values_to="value"
+  ) %>%
+  filter(is.finite(value))
+
+exprs_perc_zero_metric_df <- exprs_perc_zero_metric_df%>%
+  arrange(factor(model_id, levels=c("ST-Net", "HisToGene", "GeneCodeR", "DeepSpaCE", "DeepPT", "Hist2ST", "EGNv1", "EGNv2", "TCGN", "THItoGene", "iStar")))
+exprs_perc_zero_metric_df$model_id <- factor(exprs_perc_zero_metric_df$model_id, levels = unique(exprs_perc_zero_metric_df$model_id))
+
+# Calculate correlation statistics and prepare report
+exprs_perc_zero_metric_res <- exprs_perc_zero_metric_df %>%
+  group_by(model_id, pred_type, metric) %>%
+  do({
+    test_result <- broom::tidy(cor.test(.$value, .$perc_zero))
+    test_result$n <- nrow(.)
+    test_result
+  }) %>%
+  mutate(
+    report = sprintf(
+      "italic(t)~(%d)~'='~%.2f*','~italic(p)~'='~%.2g~','~italic(r)~'='~%.2f",
+      n - 2, statistic, p.value, estimate
+    )
+  )
+
+exprs_perc_zero_metric_df %>% 
+  ggplot() +
+  aes(x = perc_zero, y = value) +
+  geom_point(size = 1, alpha = 0.5) +
+  geom_smooth(method = "lm", formula = "y~x") +
+  geom_text(
+    data = exprs_perc_zero_metric_res,
+    aes(label = report, x = Inf, y = Inf),
+    hjust = 1, vjust = 2, size = 2.3,
+    col = "grey30",
+    parse = TRUE
+  ) + 
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  ) +
+  facet_wrap(~metric + model_id, nrow = 5, scales = "free")
+```
+
+#### Supplementary Figure 5a
+
+```{r fig.height=2, fig.width=16}
+# Plot predicted vs truth for top genes for one image
+filt_gene_df <- comb_pred_dat %>%
+  filter(pred_type == "test") %>%
+  filter(img_id == "C1" &
+           gene %in% "BGN") %>% # "C3"
+  separate("patch_id",
+           c("img_id", "patch_coord"),
+           sep = "_",
+           remove = FALSE) %>%
+  separate("patch_coord", c("x", "y"), sep = "x")
+
+# filt_gene_df_norm_BGN <- filt_gene_df_norm %>%
+#  filter(gene == "BGN", img_id=="C1")
+
+filt_gene_df <- filt_gene_df %>%
+  bind_rows(
+    filt_gene_df %>%
+      filter(model_id == "DeepPT") %>%
+      mutate(pred = exprs) %>%
+      mutate(model_id = "Ground Truth")
+  ) %>%
+ bind_rows(
+   filt_gene_df %>%
+     filter(model_id == "Hist2ST") %>%
+     mutate(pred = exprs) %>%
+     #mutate(pred = filt_gene_df_norm_BGN$NormalisedGE) %>%
+     mutate(model_id = "Hist2ST-NormalisedGE")
+ ) %>%
+  mutate_at(c("x", "y"), as.numeric) %>%
+  group_by(model_id, gene) %>%
+  mutate(pred = minMaxScaler(pred))
+
+supp5_a_exprs <- filt_gene_df %>%
+  mutate(model_id = factor(
+    model_id,
+    levels = c(
+      "Ground Truth","ST-Net", "HisToGene", "GeneCodeR", "DeepSpaCE", "DeepPT", "Hist2ST", "EGNv1", "EGNv2", "TCGN", "THItoGene", "iStar", "Hist2ST-NormalisedGE")
+    
+  )) %>%
+  ggplot() +
+  aes(x = x, y = -y, col = pred) +
+  geom_point(size=1.5) +
+  facet_wrap(~ model_id, scales = "free",
+             ncol = 13, nrow = 1) +
+  # scale_color_gradient2()+
+  scale_color_viridis_c() +
+  labs(col = "Scaled Expression",x="",y="") +
+  theme(
+    # legend.position = "bottom"
+    axis.ticks = element_blank(),
+    axis.text = element_blank(),
+    axis.line = element_blank(),
+    panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+    legend.text = element_text(size=7),
+    legend.key.size = unit(12, 'points'),
+    legend.title = element_text(size=9),
+    strip.text.x = element_text(size=12)
+  )
+
+supp5_a_exprs
+```
+
+#### Supplementary figure 7
+
+Visium-Kidney - coefficient of variation of each ground truth and predicted genes
+
+```{r, fig.height=10, fig.width=9}
+#load coefficient of variation of genes
+kidney_variance_data_combine <- readRDS("data/processed/visium/variance_data_combine_kidney.rds")%>%
+  mutate(Group = case_when(
+    Group == "ST_Net" ~ "ST-Net",
+    TRUE ~ Group
+  ))
+
+kidney_variance_data_combine$Group <- factor(kidney_variance_data_combine$Group, levels = c("ST-Net", "HisToGene", "GeneCodeR", "DeepSpaCE", "DeepPT", "Hist2ST", "EGNv1", "EGNv2", "TCGN", "THItoGene", "iStar"))
+kidney_variance_data_combine$Group <- as.factor(kidney_variance_data_combine$Group)
+kidney_variance_data_combine$Type <- factor(kidney_variance_data_combine$Type, levels = c("GT 992 genes", "Predicted 992 genes", "GT 145 genes", "Predicted 145 genes"))
+kidney_variance_data_combine$Type <- as.factor(kidney_variance_data_combine$Type)
+
+kidney_gene_variation <- ggplot(kidney_variance_data_combine, aes(x = Type, y = Variance, fill = Group, col=Group)) +
+    geom_boxplot(position = position_dodge(width = 0.8), width = 0.6, alpha = 0.5) +
+    #geom_tile(aes(x = Type, y = -0.5, fill = Type), height = 0.3, color = "black") +
+    facet_wrap(~Group, nrow = 3, ncol = 4) +
+    labs(title = "", x ="", y = "") +
+    theme_minimal() +
+    scale_fill_manual(values = dl_method_pal) +
+    scale_color_manual(values = dl_method_pal) +
+    theme(legend.title = element_blank()) +
+    theme(axis.text.x = element_text(angle = 35, hjust = 0.86, size = 5.6)) +
+    theme(panel.grid.major = element_blank()) + 
+    theme(panel.grid.minor = element_blank()) + 
+    theme(panel.background = element_rect(colour = "black", size=0.7, fill=NA))
+
+kidney_gene_variation
+```
+
+#### Supplementary figure 8
+
+Visium-HER2+ - coefficient of variation of each ground truth and predicted genes
+
+```{r, fig.height=10, fig.width=9}
+#load coefficient of variation of genes
+whole_bc_variance_data_combine <- readRDS("data/processed/visium/whole_bc_variance_data_combine.rds")%>%
+  mutate(Group = case_when(
+    Group == "ST_Net" ~ "ST-Net",
+    TRUE ~ Group
+  ))
+#sort model order
+whole_bc_variance_data_combine$Group <- factor(whole_bc_variance_data_combine$Group, levels = c("ST-Net", "HisToGene", "GeneCodeR", "DeepSpaCE", "DeepPT", "Hist2ST", "EGNv1", "EGNv2", "TCGN", "THItoGene"))
+whole_bc_variance_data_combine$Group <- as.factor(whole_bc_variance_data_combine$Group)
+whole_bc_variance_data_combine$Type <- factor(whole_bc_variance_data_combine$Type, levels = c("GT 990 genes", "Predicted 990 genes", "GT 274 genes", "Predicted 274 genes"))
+whole_bc_variance_data_combine$Type <- as.factor(whole_bc_variance_data_combine$Type)
+#plot gene variation across all spots
+whole_bc_gene_variation <- ggplot(whole_bc_variance_data_combine, aes(x = Type, y = Variance, fill = Group, col = Group)) +
+    geom_boxplot(position = position_dodge(width = 0.8), width = 0.6, alpha = 0.5) +
+    facet_wrap(~Group, nrow = 3, ncol = 4) +
+    labs(title = "", x ="", y = "") +
+    theme_minimal() +
+    scale_fill_manual(values = dl_method_pal) +
+    scale_color_manual(values = dl_method_pal) +
+    theme(legend.title = element_blank()) +
+    theme(axis.text.x = element_text(angle = 35, hjust = 0.86, size = 5.6)) +
+    theme(panel.grid.major = element_blank()) + 
+    theme(panel.grid.minor = element_blank()) + 
+    theme(panel.background = element_rect(colour = "black", size=0.7, fill=NA))
+
+whole_bc_gene_variation
+```
+
+#### Supplementary Figure 9 - datasets sparsity
+
+```{r fig.height=6, fig.width=12}
+#load processed gene expression files of all datasets 
+processed_expr_her2 <- read.csv("data/processed/her2st/processed_expr.csv", row.names = 1)
+processed_expr_cscc <- read.csv("data/processed/cscc/processed_expr.csv", row.names = 1)
+processed_expr_visium_bc_762 <- read.csv("data/processed/visium/processed_expr_visium_bc_762.csv", row.names = 1)
+processed_expr_visium_bc_990 <- read.csv("data/processed/visium/processed_visium_bc_expr_990.csv", row.names = 1)
+processed_expr_kidney <- read.csv("data/processed/visium/processed_expr_kidney.csv", row.names = 1)
+processed_expr_whole_bc <- read.csv("data/processed/visium/processed_whole_bc_expr.csv", row.names = 1)
+
+# calculate gene matrix sparsity
+sparsity_list <- list(
+  her2 = colMeans(processed_expr_her2 == 0),
+  cscc = colMeans(processed_expr_cscc == 0),
+  visium_bc_762_genes = colMeans(processed_expr_visium_bc_762 == 0),
+  visium_bc_990_genes = colMeans(processed_expr_visium_bc_990 == 0),
+  kidney = colMeans(processed_expr_kidney == 0),
+  whole_bc = colMeans(processed_expr_whole_bc == 0)
+)
+
+sparsity_data <- do.call(rbind, lapply(names(sparsity_list), function(group) {
+  data.frame(Sparsity = sparsity_list[[group]], Group = group)
+}))
+
+sparsity_data$Group <- factor(sparsity_data$Group, levels = c("her2", "cscc", "visium_bc_762_genes", 'visium_bc_990_genes', "whole_bc", "kidney"))
+
+fig_sparsity <- ggplot(sparsity_data, aes(x = Group, y = Sparsity, fill = Group, col=Group)) +
+    geom_boxplot(position = position_dodge(width = 0.8), width = 0.3, alpha = 0.5) +
+    labs(title = "", x ="", y = "") +
+    theme_minimal() +
+    scale_fill_manual(values = c("her2" = "#EDB8B0", "cscc" = "#88CEE6", 
+                               "kidney" = "#FDBF6F", "visium_bc_762_genes" = "#B2D3A4", 
+                               "visium_bc_990_genes" = "#92A5D1", "whole_bc" = "#B696B6")) +
+    scale_color_manual(values = c("her2" = "#EDB8B0", "cscc" = "#88CEE6", 
+                               "kidney" = "#FDBF6F", "visium_bc_762_genes" = "#B2D3A4", 
+                               "visium_bc_990_genes" = "#92A5D1", "whole_bc" = "#B696B6")) +
+    theme(legend.title = element_blank()) +
+    theme(axis.text.x = element_text(angle = 0, hjust = 0.5, size = 10)) +
+    theme(panel.grid.major = element_blank()) + 
+    theme(panel.grid.minor = element_blank()) + 
+    theme(panel.background = element_rect(colour = "black", size=0.7, fill=NA))
+
+fig_sparsity
+```
+
+#### Supplementary figure 10 - Kidney 992 HVGs + 145 HSGs
+
+```{r fig.height=5.5, fig.width=10}
+# Plot Boxplots of Correlations
+pred_feat_cor_kidney_145 <- pred_feat_cor_kidney_145 %>%
+  mutate(Type = paste0(model_id, " 145 genes"))
+pred_feat_cor_kidney_992 <- pred_feat_cor_kidney_992 %>%
+  mutate(Type = paste0(model_id, " 992 genes"))
+
+pred_feat_cor_kidney <- rbind(pred_feat_cor_kidney_145, pred_feat_cor_kidney_992)
+pred_feat_cor_kidney <- pred_feat_cor_kidney %>%
+  select(gene, train_fold, model_id,
+         img_id, cor_pearson, mi, ssim, auc_0, Type) %>%
+  # Average image over each patient
+  group_by(gene, model_id, Type) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  # # Average all folds and patients over each gene
+  group_by(gene, model_id, Type) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T))
+
+th <-   theme(text=element_text(size=12),
+                axis.text.x = element_text(angle = 0, hjust = 0.5),
+                panel.grid.major = element_blank(),
+                panel.grid.minor = element_blank(),
+                panel.background = element_rect(colour = "black", size=0.7, fill=NA) )
+
+pred_feat_cor_kidney <- pred_feat_cor_kidney%>%
+  arrange(factor(Type, levels=c("iStar 145 genes", "iStar 992 genes", "THItoGene 145 genes", "THItoGene 992 genes", "TCGN 145 genes", "TCGN 992 genes", "EGNv2 145 genes", "EGNv2 992 genes", "EGNv1 145 genes", "EGNv1 992 genes", "Hist2ST 145 genes", "Hist2ST 992 genes", "DeepPT 145 genes", "DeepPT 992 genes", "DeepSpaCE 145 genes", "DeepSpaCE 992 genes", "GeneCodeR 145 genes", "GeneCodeR 992 genes", "HisToGene 145 genes", "HisToGene 992 genes", "ST-Net 145 genes", "ST-Net 992 genes")))
+pred_feat_cor_kidney$Type <- factor(pred_feat_cor_kidney$Type, levels = unique(pred_feat_cor_kidney$Type))
+
+fig_kidney <- pred_feat_cor_kidney %>%
+  pivot_longer(cols=c("cor_pearson","mi", "ssim","auc_0"),
+               names_to="metric",
+               values_to="value") %>%
+  mutate(metric = factor(metric, levels = c("cor_pearson","mi",
+                                            "js_div","nrmse_sd","ssim", "auc_0"))) %>%
+  mutate(metric=case_when(
+    metric=="cor_pearson" ~ "PCC",
+    metric=="mi" ~ "MI",
+    metric=="ssim" ~ "SSIM",
+    metric=="auc_0"~"AUC",
+    TRUE ~ "other"
+  ) %>%
+    factor(., levels=c("PCC","MI","SSIM","AUC"))) %>%
+  ggplot() +
+  aes(x=Type, y=value, fill=model_id, col=model_id) +
+  geom_violin(alpha=0.2) +
+  geom_boxplot(alpha=0.5, width=0.3) +
+  facet_wrap(~metric, nrow=2, scales="free") +
+  coord_flip()+
+  scale_color_manual(values=dl_method_pal)+
+  scale_fill_manual(values=dl_method_pal)+
+  theme(legend.position = "none") +
+  th + 
+  labs(x="", y="")
+
+fig_kidney
+```
+
+#### Supplementary figure 11 - Whole BC 990 HVGs + 274 HSGs
+
+```{r fig.height=5.5, fig.width=10}
+# Plot Boxplots of Correlations
+pred_feat_cor_whole_bc_274 <- pred_feat_cor_whole_bc_274 %>%
+  mutate(Type = paste0(model_id, " 274 genes"))
+pred_feat_cor_whole_bc_990 <- pred_feat_cor_whole_bc_990 %>%
+  mutate(Type = paste0(model_id, " 990 genes"))
+pred_feat_cor_whole_bc <- rbind(pred_feat_cor_whole_bc_274, pred_feat_cor_whole_bc_990)
+
+pred_feat_cor_whole_bc<- pred_feat_cor_whole_bc %>%
+  filter(pred_type == "test") %>%
+  select(gene, pred_type, train_fold, model_id,
+         img_id, cor_pearson, mi, ssim, auc_0, Type) %>%
+  # Average image over each patient
+  group_by(gene, pred_type, train_fold, model_id, Type) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  # # Average all folds and patients over each gene
+  group_by(pred_type, gene, model_id, Type) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T))
+
+th <-   theme(text=element_text(size=12),
+                axis.text.x = element_text(angle = 0, hjust = 0.5),
+                panel.grid.major = element_blank(),
+                panel.grid.minor = element_blank(),
+                panel.background = element_rect(colour = "black", size=0.7, fill=NA) )
+
+pred_feat_cor_whole_bc <- pred_feat_cor_whole_bc%>%
+  arrange(factor(Type, levels=c("iStar 274 genes", "iStar 990 genes", "THItoGene 274 genes", "THItoGene 990 genes", "TCGN 274 genes", "TCGN 990 genes", "EGNv2 274 genes", "EGNv2 990 genes", "EGNv1 274 genes", "EGNv1 990 genes", "Hist2ST 274 genes", "Hist2ST 990 genes", "DeepPT 274 genes", "DeepPT 990 genes", "DeepSpaCE 274 genes", "DeepSpaCE 990 genes", "GeneCodeR 274 genes", "GeneCodeR 990 genes", "HisToGene 274 genes", "HisToGene 990 genes", "ST-Net 274 genes", "ST-Net 990 genes")))
+pred_feat_cor_whole_bc$Type <- factor(pred_feat_cor_whole_bc$Type, levels = unique(pred_feat_cor_whole_bc$Type))
+
+fig_whole_bc <- pred_feat_cor_whole_bc %>%
+  pivot_longer(cols=c("cor_pearson","mi", "ssim","auc_0"),
+               names_to="metric",
+               values_to="value") %>%
+  mutate(metric = factor(metric, levels = c("cor_pearson","mi",
+                                            "js_div","nrmse_sd","ssim", "auc_0"))) %>%
+  mutate(metric=case_when(
+    metric=="cor_pearson" ~ "PCC",
+    metric=="mi" ~ "MI",
+    metric=="ssim" ~ "SSIM",
+    metric=="auc_0"~"AUC",
+    TRUE ~ "other"
+  ) %>%
+    factor(., levels=c("PCC","MI","SSIM","AUC"))) %>%
+  ggplot() +
+  aes(x=Type, y=value, fill=model_id, col=model_id) +
+  geom_violin(alpha=0.2) +
+  geom_boxplot(alpha=0.5, width=0.3) +
+  facet_wrap(~metric, nrow=2, scales="free") +
+  coord_flip()+
+  scale_color_manual(values=dl_method_pal)+
+  scale_fill_manual(values=dl_method_pal)+
+  theme(legend.position = "none") +
+  th + 
+  labs(x="", y="")
+
+fig_whole_bc
+```
+
+#### Supplementary Figure 13 - HER2+ trained model on Visium-HER2+ (external validation)
+
+```{r fig.height=4, fig.width=6}
+pred_feat_cor_her2_bc <- pred_feat_cor_her2_bc%>%
+  arrange(factor(model_id, levels=c("ST-Net", "HisToGene", "GeneCodeR", "DeepSpaCE", "DeepPT", "Hist2ST", "EGNv1", "EGNv2", "TCGN", "THItoGene")))
+pred_feat_cor_her2_bc$model_id <- factor(pred_feat_cor_her2_bc$model_id, levels = unique(pred_feat_cor_her2_bc$model_id))
+
+p_pat_cor <- pred_feat_cor_her2_bc %>%
+  ggplot()+
+  aes(x=model_id,y=cor_pearson, col=model_id, fill=model_id)+
+  geom_violin(alpha=0.2)+
+  geom_boxplot(alpha=0.65, width=0.3)+
+  labs(y="PCC", x="")+
+  scale_color_manual(values=dl_method_pal)+
+  scale_fill_manual(values=dl_method_pal)+
+  theme(legend.position="none")+
+  th
+
+p_pat_cor
+```
+
+#### QC Metrics
+
+```{r}
+st_her2_qc_dat <- read.delim("data/raw/qc_her2st_results.tsv",
+                               sep = "\t", header=TRUE, skip=5, row.names = NULL) %>%
+  `colnames<-`(colnames(.)[c(2:ncol(.), 1)]) %>%
+  dplyr::select(-comments, -row.names) 
+
+st_her2_qc_df <- st_her2_qc_dat %>%
+  mutate(pat_id = gsub(".tiff", "", filename)) %>%
+  dplyr::select(-c(filename, image_bounding_box, base_mag, 
+            type, levels, comment,warnings, mpp_x, mpp_y,
+            pixels_to_use, height, width))
+
+st_cscc_qc_dat <- read.delim("data/raw/qc_cscc_results.tsv",
+                               sep = "\t", header=TRUE, skip=5, row.names = NULL) %>%
+  `colnames<-`(colnames(.)[c(2:ncol(.), 1)]) %>%
+  dplyr::select(-comments, -row.names) 
+
+st_cscc_qc_df <- st_cscc_qc_dat %>%
+  mutate(pat_id = gsub(".tiff", "", `dataset.filename`)) %>%
+  dplyr::select(-c(`dataset.filename`, image_bounding_box, base_mag, 
+            type, levels, comment,warnings, mpp_x, mpp_y,
+            pixels_to_use, height, width))
+```
+
+#### Supplementary Figure 14
+
+Dotplot of correlation between various histology QC metrics and gene-level correlations for each method in the HER2+ ST dataset and the CSCC ST dataset.
+
+```{r fig.height=9, fig.width=12}
+# Heatmap of metrics
+qc_perf_cor_df_comb <- st_her2_qc_df %>%
+  left_join(
+    pred_feat_cor %>% 
+      filter(pred_type=="test") %>% 
+      select(img_id, model_id, cor_pearson),
+    by=c("pat_id"="img_id")
+  ) %>%
+  mutate(dataset="HER2+ ST") %>%
+  bind_rows(
+    st_cscc_qc_df %>%
+    left_join(
+      pred_feat_cor_cscc %>% 
+        filter(pred_type=="test") %>% 
+        select(img_id, model_id, cor_pearson),
+      by=c("pat_id"="img_id")
+      ) %>% 
+      mutate(dataset="cSCC ST") 
+  ) %>%
+  pivot_longer(cols=!c("pat_id","cor_pearson", "model_id", "dataset"),
+               names_to="qc_metric",
+               values_to="value") %>%
+  group_by(dataset, model_id, qc_metric) %>%
+  group_modify(~{
+    cor_test_df <- cor.test(.x$cor_pearson, .x$value)
+    res_df <- data.frame(
+      qc_perf_cor=cor_test_df$estimate,
+      p_val=cor_test_df$p.value
+    )
+    return(res_df)
+  }) %>%
+  ungroup() %>% 
+  mutate(p_val_adj = p.adjust(p_val, method="fdr"))
+
+qc_mat <- qc_perf_cor_df_comb %>%
+  select(-c(p_val,p_val_adj)) %>%
+  pivot_wider(names_from="qc_metric", values_from="qc_perf_cor") 
+
+qc_mat_her2 <- qc_perf_cor_df_comb %>%
+  filter(dataset == "HER2+ ST")%>%
+  select(-c(p_val,p_val_adj)) %>%
+  pivot_wider(names_from="qc_metric", values_from="qc_perf_cor") %>%
+  tibble::column_to_rownames("model_id")
+
+# Calculate the distance matrix for rows and columns
+dist_rows <- as.dist(dist(qc_mat_her2, method = "euclidean"))
+dist_cols <- as.dist(dist(t(qc_mat %>%
+                            select(-c(dataset,model_id))),method = "euclidean"))
+
+# Perform hierarchical clustering on rows and columns
+row_clusters <- hclust(dist_rows, method = "complete")
+col_clusters <- hclust(dist_cols, method = "complete")
+
+# Get the order of rows and columns based on clustering
+row_order <- order.dendrogram(
+  as.dendrogram(dendsort(row_clusters))
+  )
+column_order <- order.dendrogram(
+  as.dendrogram(dendsort(col_clusters))
+  )
+
+ddgram <- as.dendrogram(dendsort(col_clusters)) # create dendrogram
+ggtree_plot <- ggtree::ggtree(ddgram,
+                              branch.length="none",
+                              size=.3)
+
+p_dendro <- ggtree_plot +
+  layout_dendrogram()
+
+dotplot <- qc_perf_cor_df_comb %>%
+  mutate(qc_metric=factor(qc_metric,
+                          levels=ggtree_plot$data %>% filter(isTip) %>% arrange(y) %>% pull(label))) %>%
+  mutate(model_id = factor(model_id,
+                           levels=rownames(qc_mat_her2)[row_order])) %>%
+  ggplot()+
+  aes(x=qc_metric,y=model_id, 
+      fill=qc_perf_cor,col=qc_perf_cor,
+      size=abs(qc_perf_cor)) +
+  geom_point() +
+  facet_wrap(~dataset, nrow=2) +
+  scale_color_gradient2(high="#cc2010", low="#66a6cc", mid="#fff8de")+
+  scale_fill_gradient2(high="#cc2010", low="#66a6cc", mid="#fff8de")+
+  scale_size(range = c(3, 7))+
+  labs(y="",x="Histology QC Metric", size="|PCC|", 
+       col="PCC", fill="PCC") +
+  theme_bw()+
+  theme(axis.text.x=element_text(size = 10, angle=30,hjust=1,vjust=1),
+        axis.text.y=element_text(size = 16),
+        strip.text = element_text(size = 16),
+        panel.grid = element_blank(),
+        plot.margin = margin(l = 0 + 55))
+
+p_qc_hm_comb <- plot_grid(p_dendro, NULL, dotplot, nrow=3,
+          rel_heights=c(1.5,-.25,10), align='v',
+          axis="lr")
+p_qc_hm_comb
+```
+
+#### Rank of each method
+
+```{r}
+pred_gene_msr_df <- pred_feat_cor %>%
+  mutate(dataset = "her2+") %>%
+  bind_rows(
+    pred_feat_cor_cscc %>%
+      mutate(dataset="cscc")
+  ) %>%
+  filter(pred_type == "test") %>%
+  select(gene, pred_type, train_fold, model_id,dataset,
+         img_id, cor_pearson, mi, ssim, auc_0) %>%
+  # Average image over each patient
+  group_by(gene, pred_type, train_fold, model_id, dataset) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  # Average all folds and patients over each gene
+  group_by(pred_type, gene, model_id, dataset) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T))
+
+# Average each metric over each method and rank
+pred_rank_df <- pred_feat_cor %>%
+  mutate(dataset = "her2+") %>%
+  bind_rows(
+    pred_feat_cor_cscc %>%
+      mutate(dataset="cscc")
+  ) %>%
+  ungroup() %>%
+  mutate(gene_set = "all") %>%
+  bind_rows(
+    pred_feat_cor %>%
+      ungroup() %>%
+      filter(gene %in% hv_genes) %>%
+      mutate(gene_set = "hv_genes")
+  ) %>%
+  bind_rows(
+    pred_feat_cor %>%
+      ungroup() %>%
+      semi_join(svg_genes, by = c("gene", "img_id")) %>%
+      mutate(gene_set = "SVGs")
+  ) %>%
+  # Inf values in NRMSE, remove them
+  mutate_at(vars(c(nrmse_range, nrmse_sd)),
+            function(col) ifelse(col == Inf, NaN, col)) %>%
+  mutate(pat_id = substr(img_id, 1,1)) %>%
+  # Average over each image
+  group_by(dataset, gene, pred_type, train_fold, gene_set, model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  # Average over each patient
+  group_by(gene, pred_type, train_fold, gene_set, model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  # Average over all genes
+  group_by(pred_type, train_fold, gene_set, model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  # Average the over each fold
+  group_by(pred_type, gene_set, model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  mutate(cor_pearson_r = rank(-cor_pearson),
+         nrmse_r = rank(nrmse_range),
+         js_div_r = rank(js_div),
+         mi_r = rank(-mi),
+         ssim_r = rank(-ssim),
+         auc_r = rank(-auc_0)) %>%
+  rowwise() %>%
+  mutate(mean_rank = mean(c(cor_pearson_r, nrmse_r, js_div_r, mi_r,ssim_r, auc_r))) %>%
+  ungroup() %>% 
+  arrange(mean_rank) %>%
+  mutate(model_id = factor(model_id, levels=unique(model_id))) %>%
+  pivot_longer(
+    cols=c("cor_pearson_r", "nrmse_r",
+           "js_div_r", "mi_r","ssim_r", "auc_r", "mean_rank"),
+    names_to="metric_rank",
+    values_to = "rank"
+  ) %>%
+  mutate(metric_rank = factor(metric_rank,
+                              levels=c("cor_pearson_r", "nrmse_r",
+                                       "js_div_r", "mi_r", "ssim_r", "auc_r", "mean_rank"))) %>%
+  filter(pred_type!="val")
+
+saveRDS(pred_rank_df %>% 
+          distinct(pred_type, gene_set, model_id, metric_rank, rank),
+        file="data/processed/her2st/pred_rank_df.rds")
+```
+
+#### Rank of each method - 2 Visium datasets
+
+```{r}
+#save performance of Visium-HER2+
+pred_feat_cor_whole_bc_990$pred_type <- "test"
+pred_gene_msr_df <- pred_feat_cor_whole_bc_990 %>%
+  mutate(dataset = "whole_bc") %>%
+  filter(pred_type == "test") %>%
+  select(gene, pred_type, train_fold, model_id, dataset,
+         img_id, cor_pearson, mi, ssim, auc_0) %>%
+  # Average image over each patient
+  group_by(gene, pred_type, train_fold, model_id, dataset) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  # Average all folds and patients over each gene
+  group_by(pred_type, gene, model_id, dataset) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T))
+
+# Average each metric over each method and rank
+pred_rank_df_whole_bc <- pred_feat_cor_whole_bc_990 %>%
+  mutate(dataset = "whole_bc") %>%
+  ungroup() %>%
+  # Inf values in NRMSE, remove them
+  mutate_at(vars(c(nrmse_range, nrmse_sd)),
+            function(col) ifelse(col == Inf, NaN, col)) %>%
+  mutate(pat_id = substr(img_id, 1,1)) %>%
+  # Average over each image
+  group_by(dataset, gene, pred_type, train_fold, model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  # Average over each patient
+  group_by(gene, pred_type, train_fold, model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  # Average over all genes
+  group_by(pred_type, train_fold, model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  # Average the over each fold
+  group_by(pred_type, model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  mutate(cor_pearson_r = rank(-cor_pearson),
+         nrmse_r = rank(nrmse_range),
+         js_div_r = rank(js_div),
+         mi_r = rank(-mi),
+         ssim_r = rank(-ssim),
+         auc_r = rank(-auc_0)) %>%
+  rowwise() %>%
+  mutate(mean_rank = mean(c(cor_pearson_r, nrmse_r, js_div_r, mi_r,ssim_r, auc_r))) %>%
+  ungroup() %>% 
+  arrange(mean_rank) %>%
+  mutate(model_id = factor(model_id, levels=unique(model_id))) %>%
+  pivot_longer(
+    cols=c("cor_pearson_r", "nrmse_r",
+           "js_div_r", "mi_r","ssim_r", "auc_r", "mean_rank"),
+    names_to="metric_rank",
+    values_to = "rank"
+  ) %>%
+  mutate(metric_rank = factor(metric_rank,
+                              levels=c("cor_pearson_r", "nrmse_r",
+                                       "js_div_r", "mi_r", "ssim_r", "auc_r", "mean_rank")))
+
+saveRDS(pred_rank_df_whole_bc %>% 
+          distinct(pred_type, model_id, metric_rank, rank),
+        file="data/processed/visium/pred_rank_df_whole_bc_visium.rds")
+```
+
+
+```{r}
+#save performance of Visium-Kidney
+pred_feat_cor_kidney_992$pred_type <- "test"
+pred_gene_msr_df <- pred_feat_cor_kidney_992 %>%
+  mutate(dataset = "kidney") %>%
+  filter(pred_type == "test") %>%
+  select(gene, pred_type, train_fold, model_id, dataset,
+         img_id, cor_pearson, mi, ssim, auc_0) %>%
+  # Average image over each patient
+  group_by(gene, pred_type, train_fold, model_id, dataset) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  # Average all folds and patients over each gene
+  group_by(pred_type, gene, model_id, dataset) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T))
+
+# Average each metric over each method and rank
+pred_rank_df_kidney <- pred_feat_cor_kidney_992 %>%
+  mutate(dataset = "kidney") %>%
+  ungroup() %>%
+  # Inf values in NRMSE, remove them
+  mutate_at(vars(c(nrmse_range, nrmse_sd)),
+            function(col) ifelse(col == Inf, NaN, col)) %>%
+  mutate(pat_id = substr(img_id, 1,1)) %>%
+  # Average over each image
+  group_by(dataset, gene, pred_type, train_fold, model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  # Average over each patient
+  group_by(gene, pred_type, train_fold, model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  # Average over all genes
+  group_by(pred_type, train_fold, model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  # Average the over each fold
+  group_by(pred_type, model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  mutate(cor_pearson_r = rank(-cor_pearson),
+         nrmse_r = rank(nrmse_range),
+         js_div_r = rank(js_div),
+         mi_r = rank(-mi),
+         ssim_r = rank(-ssim),
+         auc_r = rank(-auc_0)) %>%
+  rowwise() %>%
+  mutate(mean_rank = mean(c(cor_pearson_r, nrmse_r, js_div_r, mi_r,ssim_r, auc_r))) %>%
+  ungroup() %>% 
+  arrange(mean_rank) %>%
+  mutate(model_id = factor(model_id, levels=unique(model_id))) %>%
+  pivot_longer(
+    cols=c("cor_pearson_r", "nrmse_r",
+           "js_div_r", "mi_r","ssim_r", "auc_r", "mean_rank"),
+    names_to="metric_rank",
+    values_to = "rank"
+  ) %>%
+  mutate(metric_rank = factor(metric_rank,
+                              levels=c("cor_pearson_r", "nrmse_r",
+                                       "js_div_r", "mi_r", "ssim_r", "auc_r", "mean_rank")))
+
+saveRDS(pred_rank_df_kidney %>% 
+          distinct(pred_type, model_id, metric_rank, rank),
+        file="data/processed/visium/pred_rank_df_kidney_visium.rds")
+```
+
+# Session
+
+```{r}
+sessionInfo()
+```
+
+===== benchmark pipeline/01-BenchmarkUsability.Rmd =====
+---
+title: "01-BenchmarkUsability.Rmd"
+output: html_document
+date: "2024-12-30"
+editor_options: 
+  chunk_output_type: console
+license: >
+  Copyright 2024 Chuhan Wang, Adam S. Chan, Xiaohang Fu, Shila Ghazanfar, Jinman Kim, Ellis Patrick, Jean YH Yang. Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0. Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This script displays the code used to generate usability plot and generate usability score rankings for each method
+
+### Load functions required
+
+```{r}
+suppressPackageStartupMessages({
+  library(rlang)
+  library(dplyr)
+  library(tidyr)
+  library(readxl)
+  library(ggplot2)
+  library(patchwork)
+  library(ggthemr)
+})
+
+select <- dplyr::select
+slice <- dplyr::slice
+# Set ggplot theme
+ggthemr_reset()
+ggthemr('pale')
+mycolors <- c("#999999", "#0072B2", "#E69F00", "#F0E442", "#D9B3FF", "#009E73",  
+              "#D55E00", "#5D8AA8", "#CC79A7", "#56B4E9",
+              "#F3B3A6", "#A5AB81", "#B2182B", "#4393C3", "#CDBE6B", 
+              "#80CDC1", "#F4A582", "#BABABA", "#CCEBC5", "#DECBE4",
+              "#FDDFDF", "#B3DE69", "#FDBF6F", "#CCECE6", "#FB8072")
+
+mypalette <- define_palette(
+  swatch = mycolors,
+  gradient = c(lower = mycolors[1L], upper = mycolors[3L])
+)
+
+ggthemr(mypalette) # for some reason it uses the first colour as the colour of the grid lines
+theme_update(panel.grid.major = element_line(linetype="dotted"))
+```
+
+### Load Data
+
+The following code imports the usability data generated by surveying each of the analysed methods. 
+
+```{r}
+method_vars <- c("GeneCodeR", "ST-Net", "DeepPT",
+                 "Hist2ST","HisToGene","DeepSpaCE","EGNv1", "EGNv2", "TCGN", "THItoGene", "iStar")
+
+usability_df <- read_excel('data/raw/methods_usability_scoring.xlsx') %>%
+  fill(name, aspect_id, category, aspect) %>%
+  filter(!(aspect_id %in% c("license","seed_setting"))) %>%
+  # Remove last row
+  slice(-nrow(.)) %>%
+  slice(nrow(.):1) %>%
+  mutate_at(vars(all_of(method_vars)),
+            as.numeric)  %>%
+  mutate(y_end = cumsum(item_weight), 
+         y_start = c(0, y_end[-nrow(.)]))
+```
+
+Code for generating Figure 5 of the manuscript
+
+```{r fig.height=9, fig.width=7}
+# Create a df 
+usability_by_names <- usability_df %>%
+  group_by(name) %>%
+  summarise(y_mid = (min(y_start)+ max(y_end))/2) 
+
+use_score_df <- data.frame(
+  method = method_vars,
+  overall_score = lapply(
+    method_vars,
+    function(col) {
+      sum(usability_df$item_weight * usability_df[,col])
+    }
+  ) %>% 
+    unlist()
+) %>%
+  arrange(-overall_score)
+
+p_method_score <- use_score_df %>%
+  mutate(method = factor(method, levels=use_score_df$method)) %>%
+  ggplot() +
+  aes(x=method, y=overall_score, fill=overall_score) +
+  geom_bar(stat='identity') +
+  geom_text(aes(label=round(overall_score,2)),
+            vjust=2,
+            size=2.3, col="grey50") +
+  theme_void() +
+  scale_fill_gradient2(high="#75a98f", low="#BCD6C9") +
+  labs(fill="Usability Score")
+
+p_score_hm <- usability_df %>%
+  select(item, item_weight, category,
+         y_end, y_start, all_of(method_vars)) %>%
+  pivot_longer(cols=!c("item","item_weight", "category",
+                       "y_end", "y_start"),
+               names_to="method",
+               values_to="score") %>%
+  mutate(method = factor(method, levels=use_score_df$method),
+         category = factor(category, levels=rev(unique(.$category))),
+         score = factor(score, levels=c(0,.25,.5,.75,1))) %>%
+  ggplot() +
+  aes(ymin=y_start, ymax=y_end, x=method, fill=score) +
+  geom_blank()+
+  geom_rect(aes(xmin=as.numeric(method)-0.5, xmax=as.numeric(method)+0.5),
+            col="white") +
+  scale_fill_manual(values = c("grey80", "grey65", "grey50", "grey35", "grey20"), 
+                    breaks = c(0, 0.25, 0.5, 0.75, 1)) +
+  scale_y_continuous(expand = c(0, 0),
+                     breaks=usability_by_names$y_mid,
+                     labels=usability_by_names$name) +
+  theme(strip.placement = "outside",
+        strip.text = element_text(size=7),
+        strip.background = element_rect(fill="grey85"), 
+        axis.text.x = element_text(angle=45,hjust=1,vjust=1),
+        panel.background = element_blank(),
+        axis.line.x = element_blank()) +
+  facet_grid(rows=vars(category), 
+             scales="free_y", switch = "y") +
+  labs(fill="Score", x="Method")
+
+p_use_score <- usability_df %>%
+  mutate(category = factor(category, levels=rev(unique(.$category)))) %>%
+  mutate(use_score = rowMeans(usability_df[,method_vars], na.rm=TRUE)) %>%
+  ggplot() +
+  aes(ymin=y_start, ymax=y_end, fill=use_score) +
+  geom_rect(aes(xmin=0, xmax=1),
+            col="gray") +
+  scale_fill_gradient2(high="#5ccdcd", low="#e29d9d", mid="#dedad2",
+                       midpoint=0.5) +
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_x_continuous(expand = c(0, 0)) +
+  facet_grid(rows=vars(category), 
+             scales="free_y", switch = "y") +
+  theme_void() +
+  theme(axis.ticks = element_blank(),
+        axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_blank()) +
+  labs(fill="Average Score")
+
+plt <- p_method_score + plot_spacer() + p_score_hm + p_use_score +
+  plot_layout(widths = c(9, 1), heights=c(1,5), guides = 'collect')
+
+plt
+```
+
+### Save data
+
+This saves the ranked data required for overall benchmark figure
+
+```{r}
+use_cat_score_df <- usability_df %>% 
+  pivot_longer(cols=c("GeneCodeR", "ST-Net", "DeepPT", "Hist2ST", "HisToGene", "DeepSpaCE", "EGNv1", "EGNv2", "TCGN", "THItoGene", "iStar"), 
+  names_to="model_id", values_to="score") %>% 
+  group_by(category, model_id) %>% 
+  summarise(mean_score = mean(score)) %>% 
+  pivot_wider(names_from="category", values_from="mean_score")
+
+save(use_score_df,
+     use_cat_score_df,
+     file='data/processed/methods_usability_dat.RData')
+```
+===== benchmark pipeline/03-BenchmarkTCGA.Rmd =====
+---
+title: "03-BenchMarkTCGA"
+date: "2024-12-30"
+editor_options: 
+  chunk_output_type: console
+output: 
+  html_document:
+    code_folding: hide
+license: >
+  Copyright 2024 Chuhan Wang, Adam S. Chan, Xiaohang Fu, Shila Ghazanfar, Jinman Kim, Ellis Patrick, Jean YH Yang. Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0. Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Libraries
+```{r}
+suppressPackageStartupMessages({
+  # Load required packages
+  library(SingleCellExperiment)
+  library(dplyr)
+  library(magrittr)
+  library(janitor)
+  library(tidyr)
+  library(stringr)
+  library(readxl)
+  library(data.table)
+  library(cowplot)
+  library(ComplexHeatmap)
+  library(circlize)
+  library(scran)
+  library(cutpointr)
+  library(glmnet)
+  library(ClassifyR)
+  library(survival)
+  library(survminer)
+  library(ggthemr)
+  source("benchmarkUtils.R")
+})
+
+rename <- dplyr::rename
+select <- dplyr::select
+slice <- dplyr::slice
+
+# Set ggplot theme
+ggthemr_reset()
+ggthemr('pale')
+mycolors <- c("#999999", "#0072B2", "#E69F00", "#F0E442", "#D9B3FF", "#009E73",  
+              "#D55E00", "#5D8AA8", "#CC79A7", "#56B4E9",
+              "#F3B3A6", "#A5AB81", "#B2182B", "#4393C3", "#CDBE6B", 
+              "#80CDC1", "#F4A582", "#BABABA", "#CCEBC5", "#DECBE4",
+              "#FDDFDF", "#B3DE69", "#FDBF6F", "#CCECE6", "#FB8072")
+
+dl_method_pal <- c(
+  "TCGN" = "#CA9C91", 
+  "THItoGene" ="#BA7FB5", 
+  "EGNv1" = "#B3D46B", 
+  "EGNv2" =  "#F7CBDF",
+  "DeepPT"="#80B1D2", 
+  "DeepSpaCE"="#F18072", 
+  "ST-Net"="#8CD0C3",
+  "HisToGene"="#f1c232",
+  "Hist2ST"="#F9B063",
+  "GeneCodeR"="#BCB9D8",
+  "RNA-Seq"="#BABABA",
+  "RNA-Seq-STgenes"="#BABABA"
+  )
+
+mypalette <- define_palette(
+  swatch = mycolors,
+  gradient = c(lower = mycolors[1L], upper = mycolors[3L])
+)
+
+ggthemr(mypalette) # for some reason it uses the first colour as the colour of the grid lines
+theme_update(panel.grid.major = element_line(linetype="dotted"))
+
+th <-   theme(text=element_text(size=15),
+                axis.text.x = element_text(angle = 0, hjust = 0.5),
+                panel.grid.major = element_blank(),
+                panel.grid.minor = element_blank(),
+                panel.background = element_rect(colour = "black", size=0.7, fill=NA) )
+
+```
+
+### Data Loading
+
+```{r}
+# load the dataset
+tcga_rnaseq_data <- readRDS(
+  file="data/raw/tcga_brca/tcga_breast_matched_rnaseq_sce.rds"
+)
+# Get calculated metrics
+pred_feat_cor <- readRDS("data/processed/her2st/her2st_pred_feat_cor_11.rds") %>%
+  mutate(model_id = case_when(
+    model_id == "genecoder_i500_j500" ~ "GeneCodeR",
+    TRUE ~ model_id
+  )) %>%
+  mutate(ssim = ifelse(ssim < 0, 0, ssim))
+
+gene_cols <- pred_feat_cor %>% distinct(gene) %>% pull
+
+# Get TNBC Patients
+tcga_clinical_full <- read.delim("data/raw/tcga_brca/BRCA.clin.merged.txt", header=FALSE) %>%
+  t() %>%
+  as.data.table() %>%
+  row_to_names(1)
+
+tnbc_pats <- tcga_clinical_full %>%
+  filter(`patient.lab_proc_her2_neu_immunohistochemistry_receptor_status`=="negative" &
+  patient.breast_carcinoma_estrogen_receptor_status=="negative" &
+  patient.breast_carcinoma_progesterone_receptor_status=="negative") %>%
+  pull(patient.bcr_patient_barcode) %>%
+  toupper()
+
+# Calculate HV Genes
+dec_tcga <- modelGeneVar(assay(tcga_rnaseq_data, "normalized_count")[which(rownames(assay(tcga_rnaseq_data, "normalized_count")) %in% gene_cols),])
+# Get the top 10% of genes.
+hv_genes_tcga <- getTopHVGs(dec_tcga, fdr.threshold = .05)
+```
+
+### Load data
+
+The following is a dataframe with the following columns:
+
+- img_id: id of image
+- model_id: the name of method predicting gene expression
+- pat_id: id of patient the image belongs to
+- rna_id: id of the associated TCGA bulk RNA-Seq data
+- gene: name of the gene that was predicted
+- pred: predicted pseudobulk gene expression count
+- exprs: ground truth bulk gene expression count
+
+```{r}
+tcga_pred_comb_dat <- read.csv('data/raw/tcga_brca/her2st_tcga_pred_comb_dat_mean.csv')
+glimpse(tcga_pred_comb_dat)
+```
+
+### Patient-level Correlation
+
+Boxplot of patient-level correlations between predicted pseudobulk gene expression and RNA-Seq bulk gene expression over all analysed TCGA-BRCA images split by method. Models were trained on the HER2+ ST dataset, selecting the model from the 4-fold CV with the best test set performance.
+
+```{r}
+tcga_pred_pat_m_df <- tcga_pred_comb_dat %>%
+  filter(log(exprs) > 5) %>%
+  mutate(pred = log(ifelse(pred < 0, 0, pred)+1)) %>%
+  mutate(exprs = log(exprs)) %>%
+  filter(!is.na(pred)) %>%
+  group_by(pat_id, img_id, model_id) %>%
+  summarise(
+    cor_pearson = cor(exprs, pred, method = "pearson"),
+    cor_spearman = cor(exprs, pred, method = "spearman"),
+    var_exprs = var(exprs),
+    var_pred = var(pred),
+    mean_exprs = mean(exprs),
+    mean_pred = mean(pred),
+    rmse = sqrt(sum((pred - exprs) ^ 2) / n()),
+    mi = calculate_MI(pred, exprs),
+    js_div = calculate_JS_divergence(pred, exprs),
+    auc_0 = calculate_AUC(pred, exprs, 0),
+    nrmse_range = calculate_nrmse(pred, exprs, "range"),
+    nrmse_sd = calculate_nrmse(pred, exprs, "sd"),
+    .groups = "drop"
+  )
+```
+
+#### Figure 4b
+
+```{r fig.height=4, fig.width=9}
+tcga_pred_pat_m_df <- tcga_pred_pat_m_df%>%
+  arrange(factor(model_id, levels=c("ST-Net", "HisToGene", "GeneCodeR", "DeepSpaCE", "DeepPT", "Hist2ST", "EGNv1", "EGNv2", "TCGN", "THItoGene")))
+tcga_pred_pat_m_df$model_id <- factor(tcga_pred_pat_m_df$model_id, levels = unique(tcga_pred_pat_m_df$model_id))
+
+p_pat_cor <- tcga_pred_pat_m_df %>%
+  ggplot()+
+  aes(x=model_id,y=cor_pearson, col=model_id, fill=model_id)+
+  geom_violin(alpha=0.2)+
+  geom_boxplot(alpha=0.65, width=0.3)+
+  labs(y="PCC", x="")+
+  scale_color_manual(values=dl_method_pal)+
+  scale_fill_manual(values=dl_method_pal)+
+  theme(legend.position="none") + 
+  th
+
+p_pat_cor
+```
+
+### HistoQC - Relationship with image QC
+
+Scatterplot of patient-level correlations between predicted pseudobulk gene expression and RNA-Seq bulk gene expression vs. first principal component of calculated H&E quality control metrics. H&E QC metrics were calculated on stage I breast cancer patients. Line of best fit plotted along with Pearson correlation and associated p-value from a correlation test.
+
+#### Figure 4a
+
+```{r fig.height=4, fig.width=29}
+tcga_her2_qc_dat <- read.delim("data/raw/qc_tcga_her2_results_first.tsv",
+                               sep = "\t", header=TRUE, skip=5, row.names = NULL) %>%
+  `colnames<-`(colnames(.)[c(2:ncol(.), 1)]) %>%
+  dplyr::select(-comments, -row.names) %>%
+  rename(filename=X.dataset.filename)
+
+tcga_her2_qc_stand <- read.delim("data/raw/qc_tcga_her2_results_standard.tsv",
+                               sep = "\t", header=TRUE, skip=5, row.names = NULL) %>%
+  `colnames<-`(colnames(.)[c(2:ncol(.), 1)]) %>%
+  dplyr::select(-comments, -row.names) %>%
+  rename(filename=X.dataset.filename)
+
+tcga_her2_qc_df <- tcga_her2_qc_dat %>%
+  mutate(pat_id = gsub(".tiff", "", filename)) %>%
+  dplyr::select(
+    c(
+      michelson_contrast ,
+      rms_contrast , 
+      grayscale_brightness, 	
+      chan1_brightness, 
+      chan2_brightness, 
+      chan3_brightness,
+      chan1_brightness_YUV,
+      chan2_brightness_YUV,
+      chan3_brightness_YUV, pat_id))
+
+tcga_her2_qc_stand_df <- tcga_her2_qc_stand %>%
+  mutate(pat_id = gsub(".tiff", "", filename)) %>%
+  dplyr::select(c(pat_id))
+
+merge_her2_qc <- merge(tcga_her2_qc_df, tcga_her2_qc_stand_df, by = "pat_id")
+
+pca_res <- prcomp(merge_her2_qc %>% 
+                    select(-pat_id),
+                  center=TRUE,
+                  scale=TRUE)
+
+p_pc_pat_cor <- data.frame(
+  PC1=pca_res$x[,"PC1"],
+  pat_id=merge_her2_qc %>% select(pat_id)
+) %>%
+  left_join(
+    tcga_pred_pat_m_df %>% 
+      select(pat_id, model_id, cor_pearson),
+    by="pat_id"
+  ) 
+
+p_pc_pat_cor_res <- p_pc_pat_cor %>%
+  filter(PC1 < 4) %>%
+  group_by(model_id) %>%
+  group_modify(~{
+    tidy(cor.test(.x$cor_pearson, .x$PC1)) %>%
+      mutate(n = nrow(.x))
+  }) %>%
+  mutate(
+  report = sprintf(
+    "italic(t)~(%d)~'='~%.2f*','~italic(p)~'='~%.2g~','~italic(r)~'='~%.2f*','~'95%%~CI'~'['~%.2f*','~%.2f~']'",
+    n - 2, statistic, p.value, estimate, conf.low, conf.high
+  )
+)
+
+p_tcga_histoqc <- p_pc_pat_cor %>% 
+  filter(PC1 < 4) %>% 
+  ggplot() +
+  aes(x = PC1, y = cor_pearson) +
+  geom_point() +
+  geom_smooth(data = subset(p_pc_pat_cor, PC1 < 4), 
+              method = "lm", formula = "y~x", alpha = .1) +
+  geom_text(
+    data = p_pc_pat_cor_res,
+    aes(label = report, x = Inf, y = Inf),
+    hjust = 1, vjust = 1.2, size = 2, parse = TRUE, col = "grey20"
+  ) +
+  facet_wrap(~model_id, nrow = 1, scales = "free_y") +
+  labs(
+    x = "HistoQC features",
+    y = "PCC",
+    title = "Correlation Analysis with HistoQC Features"
+  ) +
+  th
+
+p_tcga_histoqc
+```
+
+### Prognostic Models in Breast Cancer Subtypes
+
+Xu J, Qin S, Yi Y, Gao H, Liu X, Ma F, Guan M. Delving into the Heterogeneity of Different Breast Cancer Subtypes and the Prognostic Models Utilizing scRNA-Seq and Bulk RNA-Seq. International Journal of Molecular Sciences. 2022; 23(17):9936. https://doi.org/10.3390/ijms23179936
+
+```{r}
+bc_pat_luminal <- tcga_clinical_full %>%
+  filter( (patient.breast_carcinoma_estrogen_receptor_status=="positive" &
+              patient.breast_carcinoma_progesterone_receptor_status=="positive") |  
+             (patient.breast_carcinoma_estrogen_receptor_status=="positive" &
+                patient.breast_carcinoma_progesterone_receptor_status=="negative")) %>%
+  pull(patient.bcr_patient_barcode) %>%
+  toupper()
+
+bc_pat_her2 <- tcga_clinical_full %>%
+  filter( `patient.lab_proc_her2_neu_immunohistochemistry_receptor_status`=="positive" 
+          ) %>% 
+  pull(patient.bcr_patient_barcode) %>%
+  toupper()
+
+bc_pat_tnbc <- tcga_clinical_full %>%
+  filter(`patient.lab_proc_her2_neu_immunohistochemistry_receptor_status`=="negative" &
+           patient.breast_carcinoma_estrogen_receptor_status=="negative" &
+           patient.breast_carcinoma_progesterone_receptor_status=="negative") %>% 
+  pull(patient.bcr_patient_barcode) %>%
+  toupper
+```
+
+
+```{r message=FALSE, warning=FALSE}
+# Get data
+# Baseline Survival Prediction using TCGA
+dpnd_var_df <- colData(tcga_rnaseq_data) %>%
+  as.data.frame() %>%
+  select(vital_status, days_to_collection, days_to_last_follow_up, ajcc_pathologic_stage, 
+         days_to_death, patient,
+         paper_vital_status, paper_days_to_last_followup, paper_pathologic_stage) %>%
+  tibble::rownames_to_column("rna_id")
+
+# Consider only the samples in the predicted data
+tcga_dl_samp_id <- tcga_pred_comb_dat %>%
+  distinct(rna_id) %>% 
+  pull
+
+tcga_samp_id <- dpnd_var_df %>%
+  tibble::rownames_to_column() %>%
+  filter(rna_id  %in% (tcga_dl_samp_id)) %>%
+  pull(rna_id)
+
+task_data <- bind_cols(
+  t(assay(tcga_rnaseq_data, "normalized_count")) %>%
+    as.data.frame(),
+  dpnd_var_df %>%
+    select(patient, vital_status, days_to_last_follow_up, days_to_death) %>%
+    mutate(days_to_last_follow_up = ifelse(is.na(days_to_death),
+                                           days_to_last_follow_up,
+                                           days_to_death)) %>%
+    select(-days_to_death)
+) %>%
+  mutate(vital_status =  as.integer(as.factor(vital_status)) - 1) %>%
+  filter(!is.na(vital_status)) %>%
+  janitor::clean_names()
+
+# Clean data by removing lowest 20% absolute exp and lowest 10% variance
+# Calculate the absolute expression values for each gene
+exp_sum <- task_data %>%
+  select(-c(patient, vital_status, days_to_last_follow_up)) %>%
+  apply(., 2, sum)
+
+# Calculate variance for each gene across samples
+exp_var <- task_data %>%
+  select(-c(patient, vital_status, days_to_last_follow_up)) %>%
+  apply(., 2, var)
+
+# Determine threshold values for selecting genes
+abs_threshold <- quantile(exp_sum, 0.2)
+variance_threshold <- quantile(exp_var, 0.1)
+
+
+# Filter genes based on criteria
+task_data_p <- task_data %>%
+  select(
+    c(patient, vital_status, days_to_last_follow_up), 
+    all_of(names(which(exp_sum > abs_threshold & exp_var > variance_threshold)))
+  ) %>%
+  filter(days_to_last_follow_up > 0) %>%
+  mutate_at(vars(-c("patient","vital_status","days_to_last_follow_up")),
+            function(col) log(col+1))
+
+model_names <- tcga_pred_comb_dat %>%
+  distinct(model_id) %>%
+  pull()
+
+getSurvPredGEDatList <- function(pat_subset) {
+  lapply(model_names,
+       function(model_name) {
+         tsk_dat <- dpnd_var_df %>%
+           select(patient, rna_id, vital_status, days_to_last_follow_up, days_to_death) %>%
+           mutate(days_to_last_follow_up = ifelse(is.na(days_to_death),
+                                                  days_to_last_follow_up,
+                                                  days_to_death)) %>%
+           select(-days_to_death) %>% 
+           filter(patient %in% pat_subset) %>%
+           select(-patient) %>%
+           left_join(
+             tcga_pred_comb_dat %>%
+               filter(model_id == model_name) %>%
+               select(-exprs) %>%
+               mutate(pred = ifelse(pred < 0, 0, pred)) %>%
+               mutate(pred = log(pred+1)) %>% 
+               # do mean normalisation
+               group_by(pat_id, model_id) %>%
+               mutate(pred = pred - mean(pred)) %>%
+               pivot_wider(names_from = "gene",
+                           values_from = "pred"),
+             by = c("rna_id" = "rna_id")
+           ) %>%
+           tibble::column_to_rownames(var="rna_id") %>%
+           select(-c(img_id, model_id, pat_id)) %>%
+           mutate(vital_status =  as.integer(as.factor(vital_status))-1) %>%
+           # Remove NA in dependent var
+           filter(!is.na(vital_status)) %>%
+           filter(!is.na(days_to_last_follow_up) & days_to_last_follow_up > 0) %>%
+           filter(!is.na(HPS6)) %>%
+           janitor::clean_names()
+         
+         return(tsk_dat)
+       })
+  }
+
+calcSurvRisk <- function(surv_data) {
+  # Univariate Cox regression, get p-values
+  # Initialize an empty data frame to store p-values
+  p_value_df <- data.frame(gene = character(0), p_value = numeric(0))
+  
+  # Loop through each gene column
+  for (gene_col in colnames(surv_data)[!(colnames(surv_data) %in% 
+                                         c("vital_status", "days_to_last_follow_up"))]) {
+    # Fit a univariate Cox regression model
+    cox_model <- coxph(Surv(days_to_last_follow_up, vital_status) ~ get(gene_col), 
+                       data = surv_data)
+    
+    # Extract the p-value and store it in the p_values data frame
+    p_value <- summary(cox_model)$coefficients[, "Pr(>|z|)"]
+    p_value_df <- rbind(p_value_df, data.frame(gene = gene_col, p_value = p_value))
+  }
+  #p_value_df <- data.frame(p_value_df)
+  # Filter genes with p-value < 0.05
+  if (sum(p_value_df$p_value < 0.005,na.rm=T) < 5) {
+    sign_uni_cox_genes <- p_value_df %>%
+      arrange(p_value) %>%
+      dplyr::slice(1:10)
+  } else {
+    sign_uni_cox_genes <- p_value_df[p_value_df$p_value < 0.005, ] %>% 
+      filter(!is.na(p_value))
+  }
+  # Prepare the input data for Lasso regression
+  X <- surv_data[, sign_uni_cox_genes$gene, drop = FALSE]
+  Y <- surv_data[, c("days_to_last_follow_up", "vital_status")]
+  
+  # Fit a Lasso regression model
+  lasso_model <- cv.glmnet(as.matrix(X), Surv(Y$days_to_last_follow_up, Y$vital_status), 
+                           alpha = 1, family = "cox")
+  
+  # Extract the selected genes based on Lasso regularization,
+  # get the model with coefficients >= 8
+  if (any(lasso_model$nzero >= 8)) {
+    selected_genes <- coef(lasso_model, s = lasso_model$lambda[which(lasso_model$nzero >= 9)[1]-1])
+  } else {
+    selected_genes <- coef(lasso_model, s = lasso_model$lambda[which.max(lasso_model$nzero)])
+  }
+  
+  # Prepare the input data for multivariate Cox regression
+  X_selected <- X[, rownames(selected_genes)[selected_genes@i], drop = FALSE]
+  
+  # Fit a multivariate Cox regression model
+  multivariate_cox_model <- coxph(Surv(Y$days_to_last_follow_up, Y$vital_status) ~ .,
+                                  data = X_selected)
+  
+  # Calculate the risk scores for each patient
+  patient_risk <- exp(coef(multivariate_cox_model) %*% t(as.matrix(X_selected)))
+  # Calculate the median risk score
+  median_pat_risk <- median(patient_risk)
+  
+  pat_risk_df <- patient_risk %>% 
+    t() %>% 
+    as.data.frame() %>%
+    tibble::rownames_to_column("rna_id") %>%
+    rename(risk=V1) %>% 
+    mutate(risk_cat = ifelse(risk >= median_pat_risk,"high-risk","low-risk")) %>%
+    bind_cols(Y)
+  
+  surv_obj <- Surv(pat_risk_df$days_to_last_follow_up, pat_risk_df$vital_status)
+  
+  surv_fit = survfit(
+    Surv(days_to_last_follow_up, vital_status) ~ risk_cat,
+    data = pat_risk_df
+    )
+  
+  p_km_surv <- ggsurvplot(
+    fit = surv_fit,
+    data = pat_risk_df,
+    risk.table = FALSE,
+    surv.median.line = "hv",
+    pval = TRUE,
+    # pval.method = TRUE,
+    pval.coord = c(0, 0.25),
+    conf.int = TRUE,
+    legend.title = "Risk Group",
+    xlab = "Time (years)",
+    ylab = "Survival Probability",
+    title = "Kaplan-Meier Survival Curves by Risk Group"
+  )
+  
+  logrank_test <- survdiff(
+    Surv(days_to_last_follow_up, vital_status) ~
+      risk_cat, 
+    data = pat_risk_df)
+  
+  return(list(
+    p_value_df=p_value_df,
+    pat_risk_df=pat_risk_df,
+    p_km_surv=p_km_surv,
+    logrank_test=logrank_test,
+    cox_model=multivariate_cox_model
+  ))
+}
+```
+
+```{r}
+#' RNA-Seq risk models
+task_data_p_luminal <- task_data_p %>%
+  filter(patient %in% bc_pat_luminal) %>%
+  select(-patient)
+
+task_data_p_her2 <- task_data_p %>%
+  filter(patient %in% bc_pat_her2) %>%
+  select(-patient)
+
+task_data_p_tnbc <- task_data_p %>%
+  filter(patient %in% bc_pat_tnbc) %>%
+  select(-patient)
+
+task_data_p_luminal_stgenes <- task_data_p %>%
+  filter(patient %in% bc_pat_luminal) %>%
+  select(-patient) %>%
+  select(vital_status, days_to_last_follow_up, any_of(make_clean_names(gene_cols)))
+
+task_data_p_her2_stgenes <- task_data_p %>%
+  filter(patient %in% bc_pat_her2) %>%
+  select(-patient) %>%
+  select(vital_status, days_to_last_follow_up, any_of(make_clean_names(gene_cols)))
+
+task_data_p_tnbc_stgenes <- task_data_p %>%
+  filter(patient %in% bc_pat_tnbc) %>%
+  select(-patient) %>%
+  select(vital_status, days_to_last_follow_up, any_of(make_clean_names(gene_cols)))
+
+#' Predicted GE risk models
+# Luminal subset for predicted GE
+surv_tasks_dat_list_luminal <- getSurvPredGEDatList(pat_subset=bc_pat_luminal)
+surv_tasks_dat_list_her2 <- getSurvPredGEDatList(pat_subset=bc_pat_her2)
+surv_tasks_dat_list_tnbc <- getSurvPredGEDatList(pat_subset=bc_pat_tnbc)
+
+
+surv_dat_list <- c(
+  list(task_data_p_luminal,   task_data_p_luminal_stgenes),
+  surv_tasks_dat_list_luminal,
+  list(task_data_p_her2,  task_data_p_her2_stgenes),
+  surv_tasks_dat_list_her2,
+  list(task_data_p_tnbc,
+  task_data_p_tnbc_stgenes),
+  surv_tasks_dat_list_tnbc
+) %>%
+  `names<-`(
+    c("RNA-Seq_luminal",
+    "RNA-Seq-STgenes_luminal",
+    sprintf("%s_luminal", model_names),
+    "RNA-Seq_her2",
+    "RNA-Seq-STgenes_her2",
+    sprintf("%s_her2", model_names),
+    "RNA-Seq_tnbc",
+    "RNA-Seq-STgenes_tnbc",
+    sprintf("%s_tnbc", model_names))
+  )
+```
+
+
+```{r eval=FALSE}
+pred_ge_surv_risk_luminal <- lapply(
+  surv_tasks_dat_list_luminal, 
+  calcSurvRisk
+  ) %>%
+  `names<-`(model_names)
+
+pred_ge_surv_risk_her2 <- lapply(
+  seq_along(surv_tasks_dat_list_her2), 
+  function(i) {
+    calcSurvRisk(surv_data=surv_tasks_dat_list_her2[[i]])
+  }) %>%
+  `names<-`(model_names)
+
+pred_ge_surv_risk_tnbc <- lapply(
+    seq_along(surv_tasks_dat_list_tnbc), 
+  function(i) {
+    calcSurvRisk(surv_tasks_dat_list_tnbc[[i]])
+  }) %>%
+  `names<-`(model_names)
+
+gt_ge_surv_risk_luminal <- calcSurvRisk(task_data_p_luminal)
+gt_ge_surv_risk_her2 <- calcSurvRisk(task_data_p_her2)
+gt_ge_surv_risk_tnbc <- calcSurvRisk(task_data_p_tnbc)
+gt_ge_stgenes_surv_risk_luminal <- calcSurvRisk(task_data_p_luminal_stgenes)
+gt_ge_stgenes_surv_risk_her2 <- calcSurvRisk(task_data_p_her2_stgenes)
+gt_ge_stgenes_surv_risk_tnbc <- calcSurvRisk(task_data_p_tnbc_stgenes)
+
+surv_risk_list <- c(
+  list(gt_ge_surv_risk_luminal),
+  list(gt_ge_stgenes_surv_risk_luminal),
+  pred_ge_surv_risk_luminal,
+  list(gt_ge_surv_risk_her2),
+  list(gt_ge_stgenes_surv_risk_her2),
+  pred_ge_surv_risk_her2,
+  list(gt_ge_surv_risk_tnbc),
+  list(gt_ge_stgenes_surv_risk_tnbc),
+  pred_ge_surv_risk_tnbc
+) %>%
+  `names<-`(
+    c("RNA-Seq_luminal",
+    "RNA-Seq-STgenes_luminal",
+    sprintf("%s_luminal", model_names),
+    "RNA-Seq_her2",
+    "RNA-Seq-STgenes_her2",
+    sprintf("%s_her2", model_names),
+    "RNA-Seq_tnbc",
+    "RNA-Seq-STgenes_tnbc",
+    sprintf("%s_tnbc", model_names))
+  )
+
+saveRDS(surv_risk_list,
+        file="data/raw/tcga_brca/tcga_pred_ge_surv_risk_list_logrna_meannorm.rds")
+```
+
+
+```{r}
+surv_risk_list <- readRDS(file="data/raw/tcga_brca/tcga_pred_ge_surv_risk_list_logrna_meannorm.rds")
+```
+
+### Train all using 5 top features
+
+#### Check data
+#### Supplementary Figure 17
+
+Boxplot of gene expression values after transformation for each sample from the TNBC & HER2 subset of the TCGA data and for all genes that were measured in the HER2+ spatial transcriptomics dataset.
+
+```{r fig.width=15, fig.height=12}
+# Plot boxplot of all genes
+surv_risk_top10feat_data <- lapply(
+  seq_along(surv_dat_list),
+  function(i) {
+    surv_dat_list[[i]] %>%
+      tibble::rownames_to_column("rna_id") %>%
+      mutate(task_id = names(surv_dat_list)[i])
+  }) %>%
+  bind_rows() %>%
+  pivot_longer(cols=!c("rna_id","task_id",
+                       "vital_status","days_to_last_follow_up"),
+               names_to="gene",
+               values_to="exprs") %>%
+  filter(!is.na(exprs)) %>%
+  separate(task_id, c("data","subgroup"), sep="_")
+
+supp_fig_surv_dat_tnbc <- surv_risk_top10feat_data %>%
+  filter(subgroup=="tnbc") %>%
+  ggplot()+
+  aes(x=rna_id,y=exprs)+
+  geom_boxplot()+
+  facet_wrap(~data, scales="free")+
+  theme(axis.text.x=element_blank(),
+      axis.ticks.x=element_blank())+
+  labs(title="Boxplots of all  genes in each data",
+       subtitle="TNBC BC Subset")
+
+supp_fig_surv_dat_tnbc
+```
+
+#### Supplementary Figure 18
+
+```{r fig.width=15, fig.height=12}
+supp_fig_surv_dat_her2 <- surv_risk_top10feat_data %>%
+  filter(subgroup=="her2") %>%
+  ggplot()+
+  aes(x=rna_id,y=exprs)+
+  geom_boxplot()+
+  facet_wrap(~data, scales="free")+
+  theme(axis.text.x=element_blank(),
+      axis.ticks.x=element_blank())+
+  labs(title="Boxplots of all  genes in each data",
+       subtitle="HER2 BC Subset")
+
+supp_fig_surv_dat_her2
+```
+
+#### CV - ClassifyR
+
+```{r, eval=FALSE}
+set.seed(12)
+system.time({
+  surv_risk_classifyr_list_top5feat_cv_3fold100rep <- lapply(
+    seq_along(surv_dat_list),
+    function(i) {
+      print(i)
+      survCrossValidated <- crossValidate(
+        surv_dat_list[[i]],
+        c("days_to_last_follow_up", "vital_status"),
+        nFeatures = c(5),
+        nFolds = 3, nRepeats = 100,
+        classifier="CoxPH",
+        selectionMethod = "CoxPH",
+        nCores = 40)
+    }) %>%
+    `names<-`(names(surv_dat_list))
+})
+
+saveRDS(surv_risk_classifyr_list_top5feat_cv_3fold100rep,
+        file="data/raw/tcga_brca/final_surv_risk_classifyr_list_top5feat_cv_3fold100rep.rds")
+```
+
+
+```{r}
+surv_risk_classifyr_list_top5feat_cv_3fold100rep <- readRDS(
+  file="data/raw/tcga_brca/final_surv_risk_classifyr_list_top5feat_cv_3fold100rep.rds")
+
+surv_eval_dat <- surv_risk_classifyr_list_top5feat_cv_3fold100rep
+
+surv_risk_classifyr_cindex <- lapply(
+  seq_along(surv_eval_dat),
+  function(i) {
+    surv_eval_dat[[i]]@predictions %>%
+      as.data.frame() %>%
+      left_join(
+        data.frame(
+          sample = surv_eval_dat[[i]]@originalNames,
+          truth = surv_eval_dat[[i]]@actualOutcome
+        ),
+        by=c("sample")
+      ) %>%
+      mutate(subset_name = names(surv_eval_dat)[i])
+  } 
+) %>%
+  bind_rows() %>%
+  left_join(
+    colData(tcga_rnaseq_data) %>% 
+      as.data.frame() %>% 
+      select(barcode, paper_pathologic_stage),
+    by=c("sample"="barcode")
+  ) %>%
+  mutate(time=as.numeric(gsub("\\+","",truth)),
+         event=ifelse(grepl("\\+",truth),0,1)) %>%
+  group_by(subset_name,permutation,fold) %>%
+  group_modify(~{
+    concordance(
+      truth~risk,
+      data=.x,
+      reverse=TRUE)$concordance %>%
+      as.data.frame() %>%
+      rename("cindex"=".")
+  }) %>%
+  group_by(subset_name) %>% 
+  mutate(cindex_avg=mean(cindex))
+```
+
+#### Plots
+##### Figure 4c-e
+C-indices of multivariate cox regression models predicting survival of TCGA-BRCA patients, using RNA-Seq bulk, RNA-Seq bulk using only genes present in HER2+ ST dataset, and the predicted pseudobulk from each method. C-indices were calculated from the test sets of a 3-fold CV with 100 repeats trained within HER2+, luminal and TNBC breast cancer clinical subtypes
+
+```{r fig.height=6, fig.width=9}
+# Plot cindex
+p_cind_boxplot <- surv_risk_classifyr_cindex %>% 
+  separate_wider_delim("subset_name", "_", names=c("data","subgroup")) %>%
+  group_by(data, permutation, subgroup) %>%
+  summarise(cindex = mean(cindex, na.rm=T), .groups="keep") %>%
+  group_by(data) %>%
+  mutate(cindex_avg = mean(cindex)) %>% 
+  ungroup() %>%
+  left_join(
+    surv_risk_classifyr_cindex %>%
+      separate_wider_delim("subset_name", "_", names=c("data","subgroup"))%>% 
+      filter(!(data %in% c("RNA-Seq","RNA-Seq-STgenes"))) %>%
+      group_by(data, subgroup) %>%
+      summarise(cindex=mean(cindex,na.rm=T), .groups="drop") %>% 
+      group_by(subgroup) %>% 
+      mutate(max_ind = ifelse(cindex == max(cindex), "*","")) %>%
+      select(data, subgroup, max_ind),
+    by=c("data"="data","subgroup"="subgroup")
+  ) %>%
+  ungroup() %>% 
+  mutate(data = factor(data, levels = c("THItoGene", "TCGN", "EGNv2","EGNv1", "Hist2ST", "DeepPT", "DeepSpaCE", "GeneCodeR", "HisToGene", "ST-Net", "RNA-Seq" ,"RNA-Seq-STgenes"))) %>% 
+  mutate(data = as.factor(data)) %>% 
+  mutate(subgroup=case_when(
+    subgroup=="her2" ~ "HER2+",
+    subgroup=="tnbc" ~ "TNBC",
+    subgroup=="luminal" ~ "Luminal",
+    TRUE~ ""
+  )) %>% 
+  ggplot() +
+  aes(x=data,y=cindex, colour=data, fill=data)+
+  geom_boxplot(alpha=.5) +
+  facet_wrap(~subgroup, nrow=2, scales="free_x")+
+  # scale_y_continuous(limits = c(0, NA), expand = c(0,0))+
+  scale_fill_manual(values=dl_method_pal)+
+  scale_colour_manual(values=dl_method_pal)+
+  coord_flip()+
+  labs(#title="C-index over each BC subgroup",
+       #subtitle="Models fit using top 10 genes within each data subset",
+       x="",y="C-index")+
+  th +
+  theme(legend.position = "none")
+
+p_cind_boxplot
+```
+
+##### Figure 4i
+
+Kaplan-Meier curves constructed using the average risk prediction from a 3-fold CV with 100 repeats within the HER2+ breast cancer subtype.
+
+```{r fig.height=2.5, fig.width=17}
+avg_risk_list <- lapply(
+  seq_along(surv_eval_dat),
+  function(i) {
+    surv_eval_dat[[i]]@predictions %>%
+      as.data.frame() %>%
+      left_join(
+        data.frame(
+          sample = surv_eval_dat[[i]]@originalNames,
+          truth = surv_eval_dat[[i]]@actualOutcome
+        ),
+        by=c("sample")
+      ) %>%
+      mutate(subset_name = names(surv_eval_dat)[i])
+  } 
+) %>%
+  bind_rows() %>%
+  mutate(truth = as.character(truth)) %>% 
+  mutate(time=as.numeric(gsub("\\+","",truth)),
+         event=ifelse(grepl("\\+",truth),0,1)) %>%
+  group_by(subset_name, sample, truth, time, event) %>% 
+  summarise(avg_risk = mean(risk), .groups="drop") %>%
+  group_by(subset_name) %>%
+  mutate(risk_cat = ifelse(avg_risk >= median(avg_risk),"high-risk","low-risk")) %>%
+  split(., f=.$subset_name)
+
+km_list <- lapply(
+  seq_along(avg_risk_list),
+  function(i) {
+    surv_fit = survfit(Surv(time, event) ~ risk_cat,
+                       data = avg_risk_list[[i]])
+    
+    p_km_surv <- ggsurvplot(
+      fit = surv_fit,
+      data = avg_risk_list[[i]],
+      risk.table = FALSE,
+      pval = TRUE,
+      pval.size = 4,
+      legend.title = "Risk Group",
+      xlab = "Time (days)",
+      ylab = "Survival Probability",
+      title = "Kaplan-Meier Survival Curves by Risk Group"
+    )
+    
+    # calculate logrank pvalue
+    p_value <- surv_pvalue(surv_fit(
+      Surv(time, event) ~ risk_cat,
+      data = avg_risk_list[[i]]
+    ))
+  
+    logrank_test <- survdiff(Surv(time, event) ~
+                               risk_cat,
+                             data = avg_risk_list[[i]])
+    
+    return(
+      p_km_surv$data.survplot %>%
+        mutate(pval.txt = p_value$pval.txt) %>%
+        mutate(pval = p_value$pval) %>%
+        mutate(subgroup = names(avg_risk_list)[i])
+      )
+  } 
+)
+
+# extract plot data from ggsurvplot
+km_surv_plot_dat_df <- km_list %>%
+  bind_rows() %>%
+  separate(subgroup, c("data", "subgroup"), sep = "_") %>%
+  mutate(
+    subgroup = case_when(
+      subgroup == "her2" ~ "HER2+",
+      subgroup == "tnbc" ~ "TNBC",
+      subgroup == "luminal" ~ "Luminal",
+      TRUE ~ ""
+    ) %>%
+      factor(., levels = c("HER2+", "TNBC", "Luminal"))
+  )
+
+th <-   theme(text=element_text(size=16),
+                axis.text.x = element_text(angle = 0, hjust = 0.5),
+                panel.grid.major = element_blank(),
+                panel.grid.minor = element_blank(),
+                panel.background = element_rect(colour = "black", size=0.7, fill=NA) )
+
+fig_4i_cv <- km_surv_plot_dat_df %>%
+  filter(subgroup=="HER2+" & data!="RNA-Seq") %>%
+  mutate(
+    data = factor(data,
+                  levels=c("RNA-Seq-STgenes", 
+                           "ST-Net", 
+                           "HisToGene", 
+                           "GeneCodeR", 
+                           "DeepSpaCE", 
+                           "DeepPT", 
+                           "Hist2ST", 
+                           "EGNv1", 
+                           "EGNv2", 
+                           "TCGN", 
+                           "THItoGene")
+                  )
+  ) %>%
+  ggplot(aes(x=time/365,y=surv, col=risk_cat))+
+  geom_step(linewidth = 1, linetype = 1)+
+  geom_point(size = 4.5, shape = "+")+
+  geom_text(aes(label=pval.txt, x=-Inf,y=-Inf),
+            vjust=-1,hjust=-.2,
+            colour="grey60", check_overlap = TRUE)+
+  scale_y_continuous(limits = c(0, 1.05), expand=c(0,0))+
+  scale_x_continuous(expand=c(0,0))+
+  ggh4x::facet_grid2(rows=vars(subgroup),cols=vars(data), 
+                     scales="free", independent = "all",switch="y")+
+  theme(legend.position="none",
+        strip.placement = "outside",
+        strip.switch.pad.grid = unit(1, "cm"),
+        axis.title.y = element_text(vjust = -15))+
+  th+
+  labs(x="Time (years)",y="Survival probability",col="Risk Category")
+
+fig_4i_cv
+```
+
+##### Supplementary Figure 16
+
+```{r fig.height=4, fig.width=17}
+fig_4e_cv_tnbc_luminal <- km_surv_plot_dat_df %>%
+  filter(subgroup!="HER2+" & data!="RNA-Seq") %>%
+  mutate(
+    data = factor(data,
+                  levels=c("RNA-Seq-STgenes", 
+                           "ST-Net", 
+                           "HisToGene", 
+                           "GeneCodeR", 
+                           "DeepSpaCE", 
+                           "DeepPT", 
+                           "Hist2ST", 
+                           "EGNv1", 
+                           "EGNv2",
+                           "TCGN", 
+                           "THItoGene")
+                  )
+  ) %>%
+  ggplot(aes(x=time/365,y=surv, col=risk_cat))+
+  geom_step(linewidth = 1, linetype = 1)+
+  geom_point(size = 4.5, shape = "+")+
+  geom_text(aes(label=pval.txt, x=-Inf,y=-Inf),
+            vjust=-1,hjust=-.2,
+            colour="grey60", check_overlap = TRUE)+
+  scale_y_continuous(limits = c(0, 1.05), expand=c(0,0))+
+  scale_x_continuous(expand=c(0,0))+
+  ggh4x::facet_grid2(rows=vars(subgroup),cols=vars(data), 
+                     scales="free", independent = "all",switch="y")+
+  theme(legend.position="bottom",
+        strip.placement = "outside",
+        strip.switch.pad.grid = unit(1, "cm"),
+        axis.title.y = element_text(vjust = -15))+
+  th +
+  labs(x="Time (years)",y="Survival probability",col="Risk Category")
+
+fig_4e_cv_tnbc_luminal
+```
+
+#### Without CV
+
+##### Figure 4f-h
+
+Kaplan-Meier curves for patients split into high and low risk groups by the median risk prediction of the multivariate cox regression models for each method and (f) HER2+, (g) luminal and (h) TNBC breast cancer subtypes. Models were trained on all patients and then the predictions of the training patients were used. The p-value represents the result of the logrank test for assessing the statistical significance of differences in survival between the groups.
+
+```{r fig.height=5.7, fig.width=17}
+calcSurvRisk2 <- function(surv_data, selected_genes) {
+  # Prepare the input data for Lasso regression
+  X <- surv_data[, selected_genes, drop = FALSE]
+  Y <- surv_data[, c("days_to_last_follow_up", "vital_status")]
+  
+  # Fit a multivariate Cox regression model
+  multivariate_cox_model <- coxph(Surv(Y$days_to_last_follow_up, Y$vital_status) ~ .,
+                                  data = X)
+  
+  # Calculate the risk scores for each patient
+  patient_risk <- coef(multivariate_cox_model) %*% t(as.matrix(X))
+  # Calculate the median risk score
+  median_pat_risk <- median(patient_risk)
+  
+  pat_risk_df <- patient_risk %>% 
+    t() %>% 
+    as.data.frame() %>%
+    tibble::rownames_to_column("rna_id") %>%
+    rename(risk=V1) %>% 
+    mutate(risk_cat = ifelse(risk >= median_pat_risk,"high-risk","low-risk")) %>%
+    bind_cols(Y)
+  
+  surv_obj <- Surv(pat_risk_df$days_to_last_follow_up, pat_risk_df$vital_status)
+  
+  surv_fit = survfit(
+    Surv(days_to_last_follow_up, vital_status) ~ risk_cat,
+    data = pat_risk_df
+    )
+  
+  p_km_surv <- ggsurvplot(
+    fit = surv_fit,
+    data = pat_risk_df,
+    risk.table = FALSE,
+    pval = TRUE,
+    pval.size=4,
+    legend.title = "Risk Group",
+    xlab = "Time (years)",
+    ylab = "Survival Probability",
+    title = "Kaplan-Meier Survival Curves by Risk Group"
+  )
+  
+  logrank_test <- survdiff(
+    Surv(days_to_last_follow_up, vital_status) ~
+      risk_cat, 
+    data = pat_risk_df)
+  
+  return(list(
+    pat_risk_df=pat_risk_df,
+    p_km_surv=p_km_surv,
+    logrank_test=logrank_test,
+    cox_model=multivariate_cox_model
+  ))
+}
+
+surv_risk_list_top5feat <- lapply(
+  seq_along(surv_dat_list),
+  function(i) {
+    calcSurvRisk2(
+      surv_data=surv_dat_list[[i]],
+      selected_genes=surv_risk_list[[i]]$p_value_df %>% 
+        arrange(p_value) %>% 
+        slice(1:5) %>% 
+        pull(gene)
+      )
+  }) %>%
+  `names<-`(names(surv_dat_list))
+
+# Plot survival curves
+km_surv_plot_dat_df <- lapply(which(!(names(surv_risk_list_top5feat) %in% c("RNA-Seq_luminal",
+                                                                 "RNA-Seq_her2",
+                                                                 "RNA-Seq_tnbc"))),
+                  function(i) {
+                    # calculate logrank pvalue
+                    p_value <- surv_pvalue(
+                      surv_fit(
+                        Surv(days_to_last_follow_up, vital_status) ~ risk_cat, 
+                        data = surv_risk_list_top5feat[[i]]$pat_risk_df
+                        )
+                      )
+                    # extract plot data from ggsurvplot
+                    surv_risk_list_top5feat[[i]]$p_km_surv$data.survplot %>%
+                      mutate(pval.txt = sprintf("p = %.2g", p_value$pval)) %>%
+                      mutate(pval=p_value$pval) %>%
+                      mutate(subgroup = names(surv_risk_list_top5feat)[i])
+       }) %>%
+  bind_rows() %>%
+  separate(subgroup, c("data","subgroup"), sep="_") %>%
+  mutate(subgroup=case_when(
+    subgroup=="her2" ~ "HER2+",
+    subgroup=="tnbc" ~ "TNBC",
+    subgroup=="luminal" ~ "Luminal",
+    TRUE~ ""
+  ) %>% 
+    factor(., levels=c("HER2+","TNBC","Luminal")))
+
+fig_4f_h <- km_surv_plot_dat_df %>%
+  mutate(
+    data = factor(data,
+                  levels=c("RNA-Seq-STgenes", km_surv_plot_dat_df %>% 
+                             distinct(pval,data,subgroup) %>%
+                             filter(data != "RNA-Seq-STgenes") %>% 
+                             group_by(data) %>% 
+                             summarise(mean_pval = mean(pval)) %>%
+                             arrange(mean_pval) %>% 
+                             pull(data)))
+  ) %>%
+    mutate(
+    data = factor(data,
+                  levels=c("RNA-Seq-STgenes", 
+                           "ST-Net", 
+                           "HisToGene", 
+                           "GeneCodeR", 
+                           "DeepSpaCE", 
+                           "DeepPT", 
+                           "Hist2ST", 
+                           "EGNv1", 
+                           "EGNv2",
+                           "TCGN", 
+                           "THItoGene")
+                  )
+  ) %>%
+  ggplot(aes(x=time/365,y=surv, col=risk_cat))+
+  geom_step(linewidth = 1, linetype = 1)+
+  geom_point(size = 4.5, shape = "+")+
+  geom_text(aes(label=pval.txt, x=-Inf,y=-Inf),
+            vjust=-1,hjust=-.2,
+            colour="grey60", check_overlap = TRUE)+
+  scale_y_continuous(limits = c(0, 1.05), expand=c(0,0))+
+  scale_x_continuous(expand=c(0,0))+
+  ggh4x::facet_grid2(rows=vars(subgroup),cols=vars(data), 
+                     scales="free", independent = "all",switch="y")+
+  theme(legend.position="bottom",
+        strip.placement = "outside",
+        strip.switch.pad.grid = unit(1, "cm"),
+        axis.title.y = element_text(vjust = -15))+
+  th+
+  labs(x="Time (years)",y="Survival probability",col="Risk Category")
+
+fig_4f_h
+```
+
+##### Supplementary Figure 15
+
+```{r fig.height=5, fig.width=9}
+#old version c-index
+risk_cat_p_df_top5feat <- lapply(
+  seq_along(surv_risk_list_top5feat),
+  function(i) {
+    data.frame(
+      task_id = names(surv_risk_list_top5feat)[i],
+      logrank_p = surv_risk_list_top5feat[[i]]$logrank_test$pvalue,
+      cindex = survival::concordance(surv_risk_list_top5feat[[i]]$cox_model)$concordance
+    )
+  }
+) %>%
+  bind_rows() %>%
+  separate(task_id, c("data","subgroup"), sep="_")
+
+risk_cat_p_df_top5feat <- risk_cat_p_df_top5feat%>%
+  arrange(factor(data, levels=c("proposed", "THItoGene", "TCGN", "EGNv2", "EGNv1", "Hist2ST", "DeepPT",   "eepSpaCE", "GeneCodeR","HisToGene","ST-Net", "RNA-Seq-STgenes", "RNA-Seq")))
+
+risk_cat_p_df_top5feat$data <- factor(risk_cat_p_df_top5feat$data, levels = unique(risk_cat_p_df_top5feat$data))
+
+# Dottlot of c-index of coxph fits
+fig_4bcd <- risk_cat_p_df_top5feat %>% 
+  group_by(data) %>%
+  mutate(mean_cindex = mean(cindex)) %>%
+  ungroup() %>%
+  left_join(
+    risk_cat_p_df_top5feat %>% 
+      filter(!(data %in% c("RNA-Seq","RNA-Seq-STgenes"))) %>%
+      group_by(subgroup) %>% 
+      mutate(max_ind = ifelse(cindex == max(cindex), "*","")) %>%
+      select(data, subgroup, max_ind),
+    by=c("data"="data","subgroup"="subgroup")
+  ) %>%
+  mutate(data = as.factor(data)) %>% 
+  mutate(subgroup=case_when(
+    subgroup=="her2" ~ "HER2+",
+    subgroup=="tnbc" ~ "TNBC",
+    subgroup=="luminal" ~ "Luminal",
+    TRUE~ ""
+  )) %>% 
+  
+  ggplot() +
+  aes(x=data,y=cindex, colour=data, fill=data,
+      group=subgroup)+
+  geom_bar(stat="identity", alpha=.65,width=.85)+
+  geom_text(aes(label = max_ind), 
+            hjust=1.75, vjust = 0.78, size=5,
+            colour = "white")+
+  facet_wrap(~subgroup, nrow=2, scales="free_x")+
+  scale_y_continuous(limits = c(0, NA), expand = c(0,0))+
+  scale_fill_manual(values=dl_method_pal)+
+  scale_colour_manual(values=dl_method_pal)+
+  coord_flip()+
+  labs(x="",y="C-index")+
+  theme(legend.position = "none")
+
+fig_4bcd
+```
+
+### Rank methods
+
+#### Pseudobulk
+
+```{r eval=FALSE}
+# Average each metric over each method and rank
+pred_rank_gene_df <- tcga_pred_m_df %>%
+  ungroup() %>%
+  # Inf values in NRMSE, remove them
+  mutate_at(vars(c(nrmse_range, nrmse_sd)),
+            function(col) ifelse(col == Inf, NaN, col)) %>%
+  # Average over each model
+  group_by(model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  mutate(cor_pearson_gene_r = rank(-cor_pearson),
+         nrmse_gene_r = rank(nrmse_range),
+         js_div_gene_r = rank(js_div),
+         mi_gene_r = rank(-mi)) %>%
+  rowwise() %>%
+  mutate(mean_gene_rank = mean(c(cor_pearson_gene_r, nrmse_gene_r, js_div_gene_r, mi_gene_r))) %>%
+  ungroup() %>% 
+  arrange(mean_gene_rank) %>%
+  mutate(model_id = factor(model_id, levels=unique(model_id))) %>%
+  pivot_longer(
+    cols=c("cor_pearson_gene_r", "nrmse_gene_r",
+           "js_div_gene_r", "mi_gene_r", "mean_gene_rank"),
+    names_to="metric_rank",
+    values_to = "rank"
+  ) %>%
+  mutate(metric_rank = factor(metric_rank,
+                              levels=c("cor_pearson_gene_r", "nrmse_gene_r",
+                                       "js_div_gene_r", "mi_gene_r", "mean_gene_rank")))
+
+pred_rank_pat_df <- tcga_pred_pat_m_df %>%
+  ungroup() %>%
+  # Inf values in NRMSE, remove them
+  mutate_at(vars(c(nrmse_range, nrmse_sd)),
+            function(col) ifelse(col == Inf, NaN, col)) %>%
+  # Average over each model
+  group_by(model_id) %>%
+  summarise_if(is.numeric, function(col) mean(col,na.rm = T)) %>%
+  mutate(cor_pearson_pat_r = rank(-cor_pearson),
+         nrmse_pat_r = rank(nrmse_range),
+         js_div_pat_r = rank(js_div),
+         mi_pat_r = rank(-mi)) %>%
+  rowwise() %>%
+  mutate(mean_pat_rank = mean(c(cor_pearson_pat_r, nrmse_pat_r, js_div_pat_r, mi_pat_r))) %>%
+  ungroup() %>% 
+  arrange(mean_pat_rank) %>%
+  mutate(model_id = factor(model_id, levels=unique(model_id))) %>%
+  pivot_longer(
+    cols=c("cor_pearson_pat_r", "nrmse_pat_r",
+           "js_div_pat_r", "mi_pat_r", "mean_pat_rank"),
+    names_to="metric_rank",
+    values_to = "rank"
+  ) %>%
+  mutate(metric_rank = factor(metric_rank,
+                              levels=c("cor_pearson_pat_r", "nrmse_pat_r",
+                                       "js_div_pat_r", "mi_pat_r", "mean_pat_rank")))
+
+pred_rank_df <- pred_rank_pat_df %>%
+  select(model_id, metric_rank, rank) %>%
+  bind_rows(
+    pred_rank_gene_df %>%
+      select(model_id, metric_rank, rank)
+  )
+
+saveRDS(pred_rank_df,
+        file="data/processed/her2st/pred_rank_df_tcgabrca.rds")
+```
+
+#### Clinical Translation
+
+```{r eval=F}
+surv_cv_avg_df <- surv_risk_classifyr_cindex %>% 
+  separate_wider_delim("subset_name", "_", names=c("data","subgroup")) %>%
+  filter(!(data %in% c("RNA-Seq","RNA-Seq-STgenes"))) %>%
+  group_by(data, permutation, subgroup) %>%
+  summarise(cindex = mean(cindex, na.rm=T), .groups="drop") %>%
+  group_by(data, subgroup) %>%
+  summarise(cindex = mean(cindex), .groups="drop") %>% 
+  group_by(data) %>%
+  summarise(cindex = mean(cindex), .groups="drop") %>%
+  mutate(cindex_cv_r = rank(-cindex)) %>%
+  left_join(
+    km_surv_plot_dat_df %>%
+      filter(!(data %in% c("RNA-Seq","RNA-Seq-STgenes"))) %>%
+      distinct(pval, data, subgroup) %>%
+      group_by(data) %>%
+      summarise(surv_diff_cv = mean(pval)) %>%
+      mutate(surv_diff_cv_r = rank(surv_diff_cv)),
+    by="data"
+  ) %>%
+  select(data, cindex_cv_r, surv_diff_cv_r)
+
+clin_trans_rank_df <- risk_cat_p_df_top5feat %>% 
+  filter(!(data %in% c("RNA-Seq","RNA-Seq-STgenes"))) %>%
+  group_by(data) %>%
+  summarise(cindex = mean(cindex),
+            pval = mean(logrank_p)) %>%
+  mutate(cindex_r = rank(-cindex),
+         surv_diff_r = rank(pval)) %>%
+  select(-cindex, -pval) %>%
+  left_join(
+    surv_cv_avg_df,
+    by="data"
+  ) %>%
+  rowwise() %>%
+  mutate(mean_clin_r = mean(c(cindex_r, surv_diff_r,
+                              cindex_cv_r, surv_diff_cv_r))) %>%
+  ungroup() %>%
+  pivot_longer(cols=!c("data"),
+               values_to="rank", names_to="metric_rank")
+
+saveRDS(clin_trans_rank_df,
+        file="./data/processed/her2st/pred_rank_df_tcga_clinicaltrans.rds")
+```
+
+### Session Info
+
+```{r}
+sessionInfo()
+```
+
+
+===== benchmark pipeline/00-CombineDat.Rmd =====
+---
+title: "00-CombineDat.Rmd"
+output: html_document
+date: "2024-12-30"
+editor_options: 
+  chunk_output_type: console
+license: >
+  Copyright 2024 Chuhan Wang, Adam S. Chan, Xiaohang Fu, Shila Ghazanfar, Jinman Kim, Ellis Patrick, Jean YH Yang. Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0. Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This script displays the code used to calculate several evaluation metrics between the predicted spatial gene expression data and the original data from several models.  
+
+### Load functions required
+
+```{r}
+suppressPackageStartupMessages({
+  library(rlang)
+  library(dplyr)
+  library(tidyr)
+  source("benchmarkUtils.R")
+})
+rename <- dplyr::rename
+select <- dplyr::select
+slice <- dplyr::slice
+```
+
+### Example - Load HER2+ Data
+
+The .rds file contains a long dataframe that has the following columns:
+
+Required:
+
+- img_id - the label for each image
+- model_id - the id for the model used to generate the predicted gene expression. If multiple models are compared, then this will contain more than one model.
+- pred_type - whether the prediction was generated from using the "train", "test" or "validation" data of the model. Requires at least one value. 
+- train_fold - If cross validation was used for model training, this column identifies which training fold was used to train the corresponding model.
+- gene- the name of the gene being predicted
+- exprs - the original data the data was trained on (after any transformations)
+- pred - the predicted gene expression
+- patch_id - the id for the patch the gene expression was predicted, contains the coordinates of the patch within the img. This column is in the form <img_id>_<x-coordinate>x<y-coordinate>
+
+Optional:
+
+- row_id - an identifier for each row in the dataframe
+
+A (very small) subset of the original data used for benchmark is presented below
+
+```{r}
+comb_pred_dat <- readRDS("data/processed/her2st/comb_pred_dat_her2st_samp.rds")
+glimpse(comb_pred_dat)
+```
+
+### Calculate metrics
+
+```{r}
+exprs_orig_df <- comb_pred_dat %>%
+  #Get ground truth exprs from DeepPT as it used original
+  filter(model_id == "DeepPT") %>%
+  select(patch_id, gene, exprs) %>%
+  distinct()
+
+## Feature Correlation
+pred_feat_cor <- comb_pred_dat %>%
+  # Get x & y coordinates for SSIM calculation
+  separate(
+    patch_id ,
+    into = c("img_id", "x_y"),
+    sep = "_",
+    convert = TRUE,
+    remove=FALSE
+  ) %>%
+  separate(x_y, into = c("x", "y"), sep = "x") %>%
+  left_join(
+    exprs_orig_df %>%
+      rename(exprs_orig = exprs),
+    by = c("patch_id" = "patch_id",
+           "gene" = "gene")
+  ) %>%
+  group_by(gene, pred_type, train_fold, model_id, img_id) %>%
+  summarise(
+    cor_pearson = cor(exprs, pred, method = "pearson"),
+    cor_spearman = cor(exprs, pred, method = "spearman"),
+    var_exprs = var(exprs),
+    var_exprs_orig = var(exprs_orig),
+    var_pred = var(pred),
+    mean_exprs = mean(exprs),
+    mean_exprs_orig = mean(exprs_orig),
+    mean_pred = mean(pred),
+    rmse = sqrt(sum((pred - exprs) ^ 2) / n()),
+    mi = calculate_MI(pred, exprs),
+    js_div = calculate_JS_divergence(pred, exprs),
+    nrmse_range = calculate_nrmse(pred, exprs, "range"),
+    nrmse_sd = calculate_nrmse(pred, exprs, "sd"),
+    ssim = calculate_SSIM(pred, exprs),
+    auc_0 = calculate_AUC(pred, exprs_orig, 0),
+    auc_1 = calculate_AUC(pred, exprs_orig, 1),
+    auc_2 = calculate_AUC(pred, exprs_orig, 2),
+    auc_5 = calculate_AUC(pred, exprs_orig, 5),
+    auc_7 = calculate_AUC(pred, exprs_orig, 7),
+    auc_10 = calculate_AUC(pred, exprs_orig, 10),
+    auc_20 = calculate_AUC(pred, exprs_orig, 20),
+    .groups = "drop"
+  )
+
+```
+
+
+===== benchmark pipeline/benchmarkUtils.R =====
+library(infotheo) # for mutual information
+library(pROC) # For AUC calculation
+
+# Function to calculate Mutual Information (MI)
+calculate_MI <- function(predicted, actual, bins) {
+  # Calculate histogram for predicted and actual values
+  hist_pred <- hist(predicted, breaks = bins, plot = FALSE)
+  hist_actual <- hist(actual, breaks = bins, plot = FALSE)
+  
+  # Calculate joint histogram
+  joint_hist <- hist2d(predicted, actual, breaks = list(hist_pred$breaks, hist_actual$breaks), plot = FALSE)
+  
+  # Calculate marginal histograms
+  marginal_hist_pred <- row_sums(joint_hist)
+  marginal_hist_actual <- col_sums(joint_hist)
+  
+  # Convert histograms to probabilities
+  marginal_prob_pred <- marginal_hist_pred / sum(marginal_hist_pred)
+  marginal_prob_actual <- marginal_hist_actual / sum(marginal_hist_actual)
+  joint_prob <- joint_hist / sum(joint_hist)
+  
+  # Calculate Mutual Information (MI)
+  mi <- sum(joint_prob * log2(joint_prob / (marginal_prob_pred %*% t(marginal_prob_actual))))
+  
+  return(mi)
+}
+
+# Function to calculate Mutual Information (MI) between predicted and actual values
+calculate_MI <- function(predicted, actual, bins) {
+  
+  # Calculate the number of bins based on the length of predicted values
+  # using the formula: max(10, length(predicted)^(1/3))
+  bins = max(10, length(predicted)^(1/3))
+  
+  # Discretize predicted and actual values into equal frequency bins
+  # using the 'discretize' function with 'equalfreq' method and 'nbins' argument
+  predicted_d <- discretize(predicted, disc="equalfreq", nbins=bins)
+  actual_d <- discretize(actual, disc="equalfreq", nbins=bins)
+  
+  # Calculate Mutual Information (MI) between predicted and actual values
+  mi <- mutinformation(predicted_d, actual_d)
+  
+  # Normalize MI by dividing it by the square root of the product of entropies of
+  # predicted and actual values
+  norm_mi <- mi / sqrt(infotheo::entropy(predicted_d) * infotheo::entropy(actual_d))
+  
+  # Return the normalized MI value
+  return(norm_mi)
+}
+
+# Function to calculate Normalized Root Mean Squared Error (NRMSE) with different options
+calculate_nrmse <- function(predicted, actual, method = "range") {
+  
+  if (method == "range") {
+    rmse <- sqrt(mean((actual - predicted)^2)) # Calculate RMSE
+    range_actual <- max(actual) - min(actual) # Calculate range of actual values
+    nrmse <- rmse / range_actual # Calculate NRMSE using range
+  } else if (method == "mean") {
+    rmse <- sqrt(mean((actual - predicted)^2)) # Calculate RMSE
+    mean_actual <- mean(actual) # Calculate mean of actual values
+    nrmse <- rmse / mean_actual # Calculate NRMSE using mean
+  } else if (method == "sd") {
+    rmse <- sqrt(mean((actual - predicted)^2)) # Calculate RMSE
+    sd_actual <- sd(actual) # Calculate standard deviation of actual values
+    nrmse <- rmse / sd_actual # Calculate NRMSE using standard deviation
+  } else {
+    stop("Invalid method argument. Please choose 'range', 'mean', or 'sd'.")
+  }
+  
+  return(nrmse)
+}
+
+calculate_JS_divergence <- function(pred, exprs) {
+  # Compute the normalized expression values and predicted values
+  norm_exprs <- if (sum(exprs) == 0) 1/length(exprs) else exprs/sum(exprs)
+  norm_pred <- if (sum(pmax(pred, 0)) == 0) 1/length(pred) else pmax(pred, 0)/sum(pmax(pred, 0))
+  
+  # Compute the JS divergence between norm_exprs and norm_pred
+  js_divergence <- philentropy::distance(x=rbind(norm_exprs,norm_pred), 
+                                         method="jensen-shannon", 
+                                         unit="log2",
+                                         mute.message = TRUE)
+  
+  return(js_divergence)
+}
+
+calculate_SSIM <- function(x, y, numBreaks = 256) {
+  x <- c(x)
+  y <- c(y)
+  
+  if (max(x) == 0) {x=rep(0,length(x))} else {x <- x / max(x)}
+  if (max(y) == 0) {y=rep(0,length(y))} else {y <- y / max(y)}
+  
+  x.dig <- cut(as.numeric(x), numBreaks, labels = F) - 1
+  y.dig <- cut(as.numeric(y), numBreaks, labels = F) - 1
+  rm(x, y)
+  
+  C1 <- (0.01 * (numBreaks - 1))^2
+  C2 <- (0.03 * (numBreaks - 1))^2
+  
+  mux <- mean(x.dig)
+  muy <- mean(y.dig)
+  sigxy <- cov(x.dig, y.dig)
+  sigx <- var(x.dig)
+  sigy <- var(y.dig)
+  
+  ssim <- ((2 * mux * muy + C1) * (2 * sigxy + C2)) / ((mux**2 + muy**2 + C1) * (sigx + sigy + C2))
+  stopifnot(ssim >= -1 && ssim <= 1)
+  
+  return(ssim)
+}
+
+# Function to calculate AUC
+calculate_AUC <- function(predicted, actual, cutoff) {
+  if (length(unique(actual > 0)) == 1) {
+    return(NA)
+  } else {
+    # Binarise actual values
+    response = ifelse(actual > cutoff, 1, 0)
+    if (length(unique(response)) == 1) {return(NA)}
+    
+    # Calculate auc
+    auc_val <- pROC::auc(response, predicted, direction="<",
+                   quiet = TRUE)
+    
+    return(as.numeric(auc_val))
+  }
+}
+
+
+# mlr3 result functions
+getAdjustedPredictions <- function(x) {
+  #' x here is a data table with row_id, truth, response, prob.responder, prob.non.responsder
+  #' This function adds one column with the new predictions adjusting for cutoff
+  isErr <- FALSE
+  
+  tryCatch({
+    x <- x %>%
+      mutate(prob.pos = get(paste0("prob.", pos_class_name)))
+    cp <- cutpointr(x, prob.pos, truth,
+                    direction=">=",
+                    pos_class= pos_class_name,
+                    method = minimize_metric, metric = roc01)$optimal_cutpoint
+    x <- x %>%
+      mutate(response_adj = ifelse(prob.pos >= cp,
+                                   pos_class_name,
+                                   neg_class_name),
+             cutoff_adj = cp) %>%
+      select(-prob.pos)
+  },
+  error=function(cond) {
+    message(cond)
+    isErr <<- TRUE
+  })
+  if (isErr) {
+    x <- x %>%
+      mutate(response_adj = response,
+             cutoff_adj = NA)
+  }
+  return(x)
+}
+
+getAllPredictions <- function(bmr_aggregate, bmr_dt, adj_cutpoint=TRUE) {
+  # Get all Predictions
+  all_test_n <- vapply(bmr_dt$prediction, 
+                       function(x) { nrow(as.data.table(x)) },
+                       1)
+  
+  all_train_n <- lapply(bmr_aggregate$resample_result, 
+                        function(x) { 
+                          lapply(x$predictions(predict_sets="train"), function(y) {
+                            nrow(as.data.table(y))
+                          })
+                        }) %>% unlist()
+  
+  all_pred_df <- bind_rows(lapply(bmr_aggregate$resample_result, # Extract prediction probabilities for test set and calculate AUC
+                                  function(x) { 
+                                    lapply(x$predictions(predict_sets="test"), function(y) {
+                                      as.data.table(y)
+                                    }) %>%
+                                      bind_rows()
+                                  })) %>%
+    mutate(task_id = rep(unlist(lapply(bmr_dt$task, function(x) {x$id})), times=all_test_n),
+           learner_id = rep(unlist(lapply(bmr_dt$learner, function(x) {x$id})), times=all_test_n),
+           test_samp = "test_set",
+           cv_loop = 1:(length(bmr_dt$iteration)/
+                          n_folds) %>% rep(each=n_folds) %>% rep(times=all_test_n),
+           iteration = bmr_dt$iteration %>%rep(times = all_test_n)) %>%
+    bind_rows(
+      bind_rows(lapply(bmr_aggregate$resample_result, # Extract prediction probabilities for test set and calculate AUC
+                       function(x) { 
+                         lapply(x$predictions(predict_sets="train"), function(y) {
+                           as.data.table(y)
+                         }) %>%
+                           bind_rows()
+                       })) %>%
+        mutate(task_id = rep(unlist(lapply(bmr_dt$task, function(x) {x$id})), times=all_train_n),
+               learner_id = rep(unlist(lapply(bmr_dt$learner, function(x) {x$id})), times=all_train_n),
+               test_samp = "train_set",
+               cv_loop = 1:(length(bmr_dt$iteration)/n_folds) %>% rep(each=n_folds) %>% rep(times=all_train_n),
+               iteration = bmr_dt$iteration %>%rep(times = all_train_n)) 
+    )
+  
+  if (adj_cutpoint) {
+    all_pred_df <- all_pred_df %>%
+      group_by(task_id, learner_id, test_samp, cv_loop, iteration) %>%
+      group_modify(~getAdjustedPredictions(.x)) %>%
+      mutate(correct_bool_adj = truth == response_adj,
+             correct_bool = truth == response)
+  }
+  
+  return(all_pred_df)
+}
+===== benchmark pipeline/04-BenchmarkRanks.Rmd =====
+---
+title: "04-BenchmarkRanks"
+date: "2024-12-30"
+editor_options: 
+  chunk_output_type: console
+output: 
+  html_document:
+    code_folding: hide
+license: >
+  Copyright 2024 Chuhan Wang, Adam S. Chan, Xiaohang Fu, Shila Ghazanfar, Jinman Kim, Ellis Patrick, Jean YH Yang. Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0. Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Data Loading
+
+### Libraries
+```{r}
+suppressPackageStartupMessages({
+  # Load required packages
+  library(dplyr)
+  library(magrittr)
+  library(janitor)
+  library(tidyr)
+  library(stringr)
+  source("benchmarkUtils.R")
+  library(funkyheatmap)
+  library(ggthemr)
+})
+
+rename <- dplyr::rename
+select <- dplyr::select
+slice <- dplyr::slice
+# Set ggplot theme
+ggthemr_reset()
+ggthemr('pale')
+mycolors <- c("#999999", "#0072B2", "#E69F00", "#F0E442", "#D9B3FF", "#009E73",  
+               "#D55E00", "#5D8AA8", "#CC79A7", "#56B4E9",
+              "#F3B3A6", "#A5AB81", "#B2182B", "#4393C3", "#CDBE6B", 
+              "#80CDC1", "#F4A582", "#BABABA", "#CCEBC5", "#DECBE4",
+              "#FDDFDF", "#B3DE69", "#FDBF6F", "#CCECE6", "#FB8072")
+
+mypalette <- define_palette(
+  swatch = mycolors,
+  gradient = c(lower = mycolors[1L], upper = mycolors[3L])
+)
+
+ggthemr(mypalette) # for some reason it uses the first colour as the colour of the grid lines
+theme_update(panel.grid.major = element_line(linetype="dotted"))
+```
+
+
+### Rank Data
+
+Load data
+```{r}
+pred_rank_df_tcgabrca <- readRDS(file="data/processed/her2st/pred_rank_df_tcgabrca.rds")
+
+pred_rank_df_train <- readRDS(file="data/processed/her2st/pred_rank_df.rds")
+
+whole_bc_pred_rank_df <- readRDS(file="data/processed/visium/pred_rank_df_whole_bc_visium.rds")
+
+kidney_pred_rank_df <- readRDS(file="data/processed/visium/pred_rank_df_kidney_visium.rds")
+
+pred_rank_df_tcgaclintrans <-  readRDS(file="data/processed/her2st/pred_rank_df_tcga_clinicaltrans.rds")
+
+load(file='data/processed/methods_usability_dat.RData')
+```
+
+### Supplementary Figure 19 - Method Performance
+```{r fig.height=6, fig.width=8}
+perf_df <- read.csv("data/processed/performance_results.csv")
+
+perf_df %>% 
+  filter(epoch!=1)%>%
+  pivot_longer(cols=!c("method","device","epoch"),
+               names_to="metric", values_to="value") %>%
+  ggplot() +
+  aes(x=method, y=log10(value))+
+  geom_boxplot()+
+  facet_wrap(~metric+device, scales="free",ncol=2) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+```
+
+### Rank Performance 
+```{r fig.height=6, fig.width=8}
+perf_rank_df <- perf_df %>% 
+  filter(epoch!=1) %>%
+  pivot_longer(cols=!c("method","device","epoch","time"),
+               names_to="metric", values_to="value") %>%
+  group_by(method, metric) %>%
+  summarise(mean_log_val = mean(log10(value)), mean_time = mean(time)) %>% 
+  group_by(metric) %>% 
+  mutate(rank_mem = rank(mean_log_val)) %>%
+  mutate(overall_time_r = rank(mean_time)) %>% 
+  select(-mean_log_val) %>%
+  pivot_wider(names_from="metric", values_from="rank_mem") %>%
+  rename(c("instantaneous_memory_r"="current_memory",
+           "peak_memory_r"="peak_memory")) %>%
+  left_join(
+    perf_df %>% 
+      filter(epoch!=1) %>% 
+      select(-contains("memory")) %>% 
+      group_by(device, method) %>% 
+      summarise(time = mean(time)) %>% 
+      pivot_wider(names_from = "device", values_from="time") %>% 
+      mutate(time_gpu_r = rank(cuda), 
+             time_cpu_r = rank(cpu)) %>%
+      mutate(time_gpu_r = ifelse(is.na(cuda), NA, time_gpu_r),
+             time_cpu_r = ifelse(is.na(cpu), NA, time_cpu_r)) %>%
+      select(-cuda, -cpu),
+    by="method"
+  ) %>%
+  rowwise() %>%
+  mutate(perf_rank = mean(c(instantaneous_memory_r, peak_memory_r,
+                          overall_time_r), na.rm=T))
+```
+
+### Overall Heatmap
+
+```{r message=FALSE}
+# Make a data frame with each of the models
+scale_values <- function(x){(x-min(x,na.rm=T))/(max(x,na.rm=T)-min(x,na.rm=T))}
+
+benchmark_all_df <- use_score_df %>%
+  rename(usability_overall_score = overall_score) %>%
+  rename(id = method) %>%
+  mutate_at(vars(c("usability_overall_score")),
+            function(col) col/35) %>%
+  mutate(usability_overall_score = replace_na(usability_overall_score, 0)) %>% 
+  mutate(method_platform=case_when(
+    id == "GeneCodeR" ~ "R",
+    id == "Hist2ST" ~ "Python",
+    id == "HisToGene" ~ "Python",
+    id == "ST-Net" ~ "Python",
+    id == "DeepSpaCE" ~ "R & Python",
+    id == "DeepPT" ~ "Python",
+    id == "EGNv1" ~ "Python",
+    id == "EGNv2" ~ "Python",
+    id == "TCGN" ~ "Python",
+    id == "THItoGene" ~ "Python",
+    id == "iStar" ~ "Python",
+    TRUE ~ NA
+  )) %>%
+  mutate(deep_learning=case_when(
+    id == "GeneCodeR" ~ "No",
+    id == "Hist2ST" ~ "Yes",
+    id == "HisToGene" ~ "Yes",
+    id == "ST-Net" ~ "Yes",
+    id == "DeepSpaCE" ~ "Yes",
+    id == "DeepPT" ~ "Yes",
+    id == "EGNv1" ~ "Yes",
+    id == "EGNv2" ~ "Yes",
+    id == "TCGN" ~ "Yes",
+    id == "THItoGene" ~ "Yes",
+    id == "iStar" ~ "Yes",
+    TRUE ~ NA
+  )) %>%
+  mutate(reimplemented=case_when(
+    id == "GeneCodeR" ~ "No",
+    id == "Hist2ST" ~ "No",
+    id == "HisToGene" ~ "No",
+    id == "ST-Net" ~ "Yes",
+    id == "DeepSpaCE" ~ "No",
+    id == "DeepPT" ~ "Yes",
+    id == "EGNv1" ~ "No",
+    id == "EGNv2" ~ "No",
+    id == "TCGN" ~ "No",
+    id == "THItoGene" ~ "No",
+    id == "iStar" ~ "No",
+    TRUE ~ NA
+  )) %>%
+  mutate(trainable_params=case_when(
+    id == "GeneCodeR" ~ "75,264,000",
+    id == "Hist2ST" ~ "230,000,000",
+    id == "HisToGene" ~ "222,253,841",
+    id == "ST-Net" ~ "7,973,733",
+    id == "DeepSpaCE" ~ "137,476,689",
+    id == "DeepPT" ~ "26,641,472",
+    id == "EGNv1" ~ "135,000,000",
+    id == "EGNv2" ~ "12,000,000",
+    id == "TCGN" ~ "29,000,000",
+    id == "THItoGene" ~ "63,600,000",
+    id == "iStar" ~ "2,190,000",
+    TRUE ~ NA
+  )) %>%
+  mutate(whole_image_spatial=ifelse(id %in% c("Hist2ST", "HisToGene", "iStar", "THItoGene"),
+                                    "Yes", "No")) %>%
+  left_join(
+    pred_rank_df_train %>% 
+      pivot_wider(names_from = metric_rank, values_from =rank) %>%
+      filter(gene_set == "all" & pred_type=="test")  %>%
+      select(-c(pred_type, gene_set)) %>%
+      mutate_at(vars(-model_id),
+                function(col) -col),
+    by=c("id"="model_id")
+  ) %>%
+  left_join(
+    whole_bc_pred_rank_df%>% 
+      pivot_wider(names_from = metric_rank, values_from =rank) %>%
+      select(-c(pred_type)) %>%
+      mutate(across(where(is.numeric), ~ - .)) %>%
+    rename_with(~ paste0(.x, "_whole_bc"), -model_id),
+    by=c("id"="model_id")
+  ) %>%
+  left_join(
+    kidney_pred_rank_df%>% 
+      pivot_wider(names_from = metric_rank, values_from =rank) %>%
+      select(-c(pred_type)) %>%
+      mutate(across(where(is.numeric), ~ - .)) %>%
+    rename_with(~ paste0(.x, "_kidney"), -model_id),
+    by=c("id"="model_id")
+  ) %>%
+  left_join(
+    pred_rank_df_tcgabrca %>% 
+      distinct(model_id, metric_rank, rank) %>%
+      pivot_wider(names_from = metric_rank, values_from =rank) %>% 
+      rowwise() %>% 
+      mutate(overall_r = mean(c(mean_pat_rank, mean_gene_rank))) %>%
+      ungroup() %>%
+      mutate_at(vars(-model_id),
+                function(col) -col) %>%
+      `colnames<-`(paste0(colnames(.),"_tcga")),
+    by=c("id"="model_id_tcga")
+  ) %>%
+  left_join(
+    pred_rank_df_tcgaclintrans %>%
+      pivot_wider(names_from = metric_rank, values_from=rank)  %>%
+      mutate_at(vars(-data),
+                function(col) -col),
+    by=c("id"="data")
+  ) %>%
+  mutate(across(where(is.numeric), ~ if_else(is.na(.x), as.integer(min(.x, na.rm = TRUE)) - 1, .x))) %>%
+  left_join(
+    perf_rank_df %>% 
+      mutate_at(vars(-method),
+                function(col) -col),
+    by=c("id"="method")
+  ) %>%
+  left_join(
+    use_cat_score_df,
+    by=c("id"="model_id")
+  ) %>%
+  rowwise() %>%
+  mutate(mean_rank_visium_rank = mean(c(mean_rank_whole_bc,mean_rank_kidney)))%>%
+  mutate(overall_overall_rank = mean(c(mean_rank,mean_rank_whole_bc,mean_rank_kidney, overall_r_tcga,mean_clin_r,perf_rank,usability_overall_score))) %>%
+  
+  arrange(-overall_overall_rank)
+```
+
+
+```{r fig.height=6, fig.width=12, message=FALSE}
+column_info <- tribble(
+  ~id,     ~group,         ~name,                      ~geom,        ~palette,    ~options,
+  "id",    NA,             "",                         "text",       NA,          list(hjust = 0, width = 3),
+  "method_platform",   "characteristics",      "Platform",           "text",        "palette1",  list(width = 4, legend = FALSE),
+  "reimplemented",   "characteristics",      "Remplemented",           "text",        "palette1",  list(legend = FALSE),
+  "deep_learning", "characteristics", "Deep Learning", "text", "palette1", lst(),
+  "trainable_params",   "characteristics",      "#Trainable Parameters",           "text",        "palette1",  list(width = 4, legend = FALSE),
+  "whole_image_spatial",   "characteristics",      "Whole Image Spatial",           "text",        "palette1",  list(legend = FALSE),
+  "overall_overall_rank",  "overall",       "Overall",    "bar",  "palette0",  list(width = 4, legend = FALSE),
+  "mean_rank",  "overall",       "Gene Expression Prediction",    "bar",  "palette1",  list(width = 4, legend = FALSE),
+  "mean_rank_visium_rank",  "overall",       "Gene Expression Prediction Visium",    "bar",  "palette2",  list(width = 4, legend = FALSE),
+  "overall_r_tcga",   "overall",      "Model Generalisability",           "bar",        "palette3",  list(width = 4, legend = FALSE),
+  "mean_clin_r",  "overall",       "Clinical Translational Impact",    "bar",  "palette4",  list(width = 4, legend = FALSE),
+  "usability_overall_score",   "overall",      "Usability",      "bar",        "palette5",  list(width = 4, legend = FALSE),
+  "perf_rank",  "overall",       "Computational Efficiency",    "bar",  "palette6",  list(width = 4, legend = FALSE),
+)
+
+# Define column groups
+column_groups <- tribble( # tribble_start
+  ~Experiment, ~Category,  ~group,         ~palette,
+  "Characteristics", "",  "characteristics",      "overall",
+  "Summary", "",  "overall",      "overall",
+  "Usability", "", "usability",       "palette5",
+  "Gene Expression Prediction ST", "", "ge_recap",       "palette1",
+  "Gene Expression Prediction Visium", "Visium BC", "ge_recap_whole_bc",       "palette2",
+  "Gene Expression Prediction Visium", "Visium Kidney", "ge_recap_kidney",       "palette2",
+  "Model Generalisability", "Gene-level", "ge_recap_tcga_gene",       "palette3",
+  "Model Generalisability", "Sample-level", "ge_recap_tcga_sample",       "palette3",
+  "Clinical Translation Impact", "", "ge_clinical_translation",       "palette4",
+  "Computational Efficiency", "", "ge_comp_eff",       "palette6"
+) 
+
+# Determine palettes
+generateColorPalette <- function(baseColor, numColors, rev=FALSE) {
+  # Create a gradient from the base color to a lighter version
+  colors <- colorRampPalette(c(baseColor, "white"))(numColors)
+  if (rev) {
+    colors=rev(colors)
+  }
+  return(colors)
+}
+
+palettes <- tribble(
+  ~palette,             ~colours,
+  "overall",            grDevices::colorRampPalette(rev(RColorBrewer::brewer.pal(9, "Greys")[-1]))(101),
+  # recapitulation gene expression - ST
+  "palette1",           rev(generateColorPalette("#92a5d1", 20)[5:18]), 
+  # gene expression - Visium
+  "palette2",           rev(generateColorPalette("#f18072", 20)[10:18]), 
+  # tcga prediction 
+  "palette3",           rev(generateColorPalette("#b696b6", 20)[5:18]), 
+  # clinical prediction 
+  "palette4",           rev(generateColorPalette("#94cbca", 20)[5:18]), 
+  # usability 
+  "palette5",           rev(generateColorPalette("#b2d3a4", 20)[5:18]), 
+  # efficiency
+  "palette6",           rev(generateColorPalette("#FDBF6F", 20)[5:18]), 
+  # overall
+  "palette0",           rev(generateColorPalette("#F4A582", 20)[5:18]), 
+)
+
+# Determine method grouping
+benchmark_all_df <- as.data.frame(benchmark_all_df)
+row_info <- benchmark_all_df %>% transmute(id, group = "he_st")
+row_groups <- tibble(Group = "H&E > ST", group = "he_st")
+
+g <- funky_heatmap(
+  data = benchmark_all_df,
+  column_info = column_info,
+  column_groups = column_groups,
+  row_info = row_info,
+  row_groups = row_groups,
+  palettes = palettes,
+  legends= list(list(geom="funkyrect", title="Score", palette="palette1")),
+  expand = list(xmax = 4) +
+  theme(
+  legend.background = element_rect(fill = "white", colour = NA),
+  legend.key = element_rect(fill = "transparent", colour = NA))
+)  + theme(
+    legend.background = element_rect(fill = "white", colour = NA),
+    legend.key = element_rect(fill = "transparent", colour = NA),
+    text = element_text(size = 12),     
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),      
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 12),
+  )
+
+g
+```
+
+### Detailed Heatmap
+
+```{r fig.height=8, fig.width=16, message=FALSE}
+# Make a data frame with each of the models
+scale_values <- function(x){(x-min(x,na.rm=T))/(max(x,na.rm=T)-min(x,na.rm=T))}
+
+column_info_detailed <- tribble(
+  ~id,     ~group,         ~name,                      ~geom,        ~palette,    ~options,
+  "id",    NA,             "",                         "text",       NA,          list(hjust = 0, width = 3),
+  "cor_pearson_r",  "ge_recap",       "PCC",    "funkyrect",  "palette1",  lst(legend=TRUE),
+  "nrmse_r",  "ge_recap",       "NRMSE",    "funkyrect",  "palette1",  lst(legend=FALSE),
+  "js_div_r",  "ge_recap",       "JS-Div",    "funkyrect",  "palette1",  lst(legend=FALSE),
+  "mi_r",  "ge_recap",       "MI",    "funkyrect",  "palette1",  lst(legend=FALSE),
+  "ssim_r",  "ge_recap",       "SSIM",    "funkyrect",  "palette1",  lst(legend=FALSE),
+  "auc_r",  "ge_recap",       "AUC",    "funkyrect",  "palette1",  lst(legend=FALSE),
+  "cor_pearson_r_whole_bc",  "ge_recap_whole_bc",       "PCC",    "funkyrect",  "palette2",  lst(legend=TRUE),
+  "nrmse_r_whole_bc",  "ge_recap_whole_bc",       "NRMSE",    "funkyrect",  "palette2",  lst(legend=FALSE),
+  "js_div_r_whole_bc",  "ge_recap_whole_bc",       "JS-Div",    "funkyrect",  "palette2",  lst(legend=FALSE),
+  "mi_r_whole_bc",  "ge_recap_whole_bc",       "MI",    "funkyrect",  "palette2",  lst(legend=FALSE),
+  "ssim_r_whole_bc",  "ge_recap_whole_bc",       "SSIM",    "funkyrect",  "palette2",  lst(legend=FALSE),
+  "auc_r_whole_bc",  "ge_recap_whole_bc",       "AUC",    "funkyrect",  "palette2",  lst(legend=FALSE),
+  "cor_pearson_r_kidney",  "ge_recap_kidney",       "PCC",    "funkyrect",  "palette2",  lst(legend=TRUE),
+  "nrmse_r_kidney",  "ge_recap_kidney",       "NRMSE",    "funkyrect",  "palette2",  lst(legend=FALSE),
+  "js_div_r_kidney",  "ge_recap_kidney",       "JS-Div",    "funkyrect",  "palette2",  lst(legend=FALSE),
+  "mi_r_kidney",  "ge_recap_kidney",       "MI",    "funkyrect",  "palette2",  lst(legend=FALSE),
+  "ssim_r_kidney",  "ge_recap_kidney",       "SSIM",    "funkyrect",  "palette2",  lst(legend=FALSE),
+  "auc_r_kidney",  "ge_recap_kidney",       "AUC",    "funkyrect",  "palette2",  lst(legend=FALSE),
+  "cor_pearson_gene_r_tcga",  "ge_recap_tcga_gene",       "PCC",    "funkyrect",  "palette3",  lst(legend=FALSE),
+  "nrmse_gene_r_tcga",  "ge_recap_tcga_gene",       "NRMSE",    "funkyrect",  "palette3",  lst(legend=FALSE),
+  "js_div_gene_r_tcga",  "ge_recap_tcga_gene",       "JS-Div",    "funkyrect",  "palette3",  lst(legend=FALSE),
+  "mi_gene_r_tcga",  "ge_recap_tcga_gene",       "MI",    "funkyrect",  "palette3",  lst(legend=FALSE),
+  "mean_gene_rank_tcga",  "ge_recap_tcga_gene",       "Overall",    "funkyrect",  "palette3",  lst(legend=FALSE),
+  "cor_pearson_pat_r_tcga",  "ge_recap_tcga_sample",       "PCC",    "funkyrect",  "palette3",  lst(legend=FALSE),
+  "nrmse_pat_r_tcga",  "ge_recap_tcga_sample",       "NRMSE",    "funkyrect",  "palette3",  lst(legend=FALSE),
+  "js_div_pat_r_tcga",  "ge_recap_tcga_sample",       "JS-Div",    "funkyrect",  "palette3",  lst(legend=FALSE),
+  "mi_pat_r_tcga",  "ge_recap_tcga_sample",       "MI",    "funkyrect",  "palette3",  lst(legend=FALSE),
+  "mean_pat_rank_tcga",  "ge_recap_tcga_sample",       "Overall",    "funkyrect",  "palette3",  lst(legend=FALSE),
+  "cindex_r",  "ge_clinical_translation",       "C-index",    "funkyrect",  "palette4",  lst(legend=FALSE),
+  "surv_diff_r",  "ge_clinical_translation",       "Logrank p-value",    "funkyrect",  "palette4",  lst(legend=FALSE),
+  "availability",  "usability",  "Availability",    "funkyrect",  "palette5",  lst(legend=FALSE),
+  "behaviour",  "usability",       "Behaviour",    "funkyrect",  "palette5",  lst(legend=FALSE),
+  "code_assurance",  "usability",       "Code assurance",    "funkyrect",  "palette5",  lst(legend=FALSE),
+  "code_quality",  "usability",       "Code quality",    "funkyrect",  "palette5",  lst(legend=FALSE),
+  "documentation",  "usability",       "Documentation",    "funkyrect",  "palette5",  lst(legend=FALSE),
+  "generalisability",  "usability",       "Code generalisability",    "funkyrect",  "palette5",  lst(legend=FALSE),
+  "paper",  "usability",       "Paper",    "funkyrect",  "palette5",  lst(legend=FALSE),
+  "reproducibility",  "usability",       "Reproducibility",    "funkyrect",  "palette5",  lst(legend=FALSE),
+  "instantaneous_memory_r",  "ge_comp_eff",       "Instantaneous Mem.",    "funkyrect",  "palette6",  lst(legend=FALSE),
+  "peak_memory_r",  "ge_comp_eff",       "Peak Mem.",    "funkyrect",  "palette6",  lst(legend=FALSE),
+  "time_gpu_r",  "ge_comp_eff",       "Time (GPU)",    "funkyrect",  "palette6",  lst(legend=FALSE),
+  "time_cpu_r",  "ge_comp_eff",       "Time (CPU)",    "funkyrect",  "palette6",  lst(legend=FALSE),
+)
+
+# Define column groups
+column_groups <- tribble( # tribble_start
+  ~Experiment, ~Category,  ~group,         ~palette,
+  "Characteristics", "",  "characteristics",      "overall",
+  "Summary", "",  "overall",      "overall",
+  "Usability", "", "usability",       "palette5",
+  "GE Prediction ST", "", "ge_recap",       "palette1",
+  "GE Prediction Visium", "Visium BC", "ge_recap_whole_bc",       "palette2",
+  "GE Prediction Visium", "Visium Kidney", "ge_recap_kidney",       "palette2",
+  "Model Generalisability", "Gene-level", "ge_recap_tcga_gene",       "palette3",
+  "Model Generalisability", "Sample-level", "ge_recap_tcga_sample",       "palette3",
+  "Impact", "", "ge_clinical_translation",       "palette4",
+  "Efficiency", "", "ge_comp_eff",       "palette6"
+) 
+
+# Determine method grouping
+row_info <- benchmark_all_df %>% transmute(id, group = "he_st")
+row_groups <- tibble(Group = "H&E > ST", group = "he_st")
+
+g_2 <- funky_heatmap(
+  data = benchmark_all_df,
+  column_info = column_info_detailed,
+  column_groups = column_groups,
+  row_info = row_info,
+  row_groups = row_groups,
+  palettes = palettes,
+  legends = list(
+    list(
+      title = "Rank",
+      palette = "palette1",
+      geom = "funkyrect",
+      labels = c("NA", " ", "6", " ", "5", "", "4", "3", "2", "1"),
+      size = c(0, 0, .15, .3, .45, .6, .75, .85, .9, 1)
+    )
+  ),
+  expand = list(xmax = 4) +
+  theme(
+  legend.background = element_rect(fill = "white", colour = NA),
+  legend.key = element_rect(fill = "transparent", colour = NA), 
+    legend.title = element_text(size = 13), 
+    legend.text = element_text(size = 12)))
+  
+g_2
+```
+
+
+```{r}
+sessionInfo()
+```
+
+
+

@@ -21,7 +21,9 @@ class RecallAtK(Metric):
 
     def update(self, logits: torch.Tensor, target: torch.Tensor) -> None:
         # Get top-k predictions
-        _, top_k_preds = torch.topk(logits, self.k, dim=1)
+        # CodeGuardian: Handle cases where batch size < k
+        k_eff = min(self.k, logits.size(1))
+        _, top_k_preds = torch.topk(logits, k_eff, dim=1)
         
         # Check if the target is in the top-k predictions
         # target.view(-1, 1) expands target to be comparable with each of the k predictions

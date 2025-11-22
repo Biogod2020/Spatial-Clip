@@ -8,7 +8,7 @@ import rootutils
 import torch
 from lightning import Callback, LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.loggers import Logger
-from omegaconf import DictConfig
+from omegaconf import DictConfig, open_dict
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 # ------------------------------------------------------------------------------------ #
@@ -73,11 +73,30 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         datamodule.tokenizer = model.net.tokenizer
     # <<< End of Fix >>>
 
+    # CodeGuardian: Conditionally instantiate ModelCheckpoint
+    if not cfg.get("save_ckpt", True):
+        log.info("Skipping ModelCheckpoint callback as save_ckpt is False.")
+        if "callbacks" in cfg and cfg.callbacks:
+            # Filter out model_checkpoint from the DictConfig
+            # We need to cast to dict to modify, or use OmegaConf methods if strict
+            # But instantiate_callbacks expects a DictConfig or dict.
+            # Let's just remove the key if it exists.
+            if "model_checkpoint" in cfg.callbacks:
+                del cfg.callbacks.model_checkpoint
+
     log.info("Instantiating callbacks...")
     callbacks: List[Callback] = instantiate_callbacks(cfg.get("callbacks"))
 
     log.info("Instantiating loggers...")
     logger: List[Logger] = instantiate_loggers(cfg.get("logger"))
+
+    # CodeGuardian: Explicitly control enable_checkpointing in Trainer config
+    if "save_ckpt" in cfg:
+        # Ensure we don't overwrite if it's not a DictConfig (though it should be)
+        if isinstance(cfg.trainer, DictConfig):
+            with open_dict(cfg.trainer):
+                cfg.trainer.enable_checkpointing = cfg.save_ckpt
+            log.info(f"Setting trainer.enable_checkpointing to {cfg.save_ckpt}")
 
     log.info(f"Instantiating trainer <{cfg.trainer._target_}>")
     trainer: Trainer = hydra.utils.instantiate(cfg.trainer, callbacks=callbacks, logger=logger)
@@ -103,8 +122,11 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     if cfg.get("test"):
         log.info("Starting testing!")
-        ckpt_path = trainer.checkpoint_callback.best_model_path
-        if ckpt_path == "":
+        ckpt_path = None
+        if trainer.checkpoint_callback and hasattr(trainer.checkpoint_callback, "best_model_path"):
+            ckpt_path = trainer.checkpoint_callback.best_model_path
+
+        if ckpt_path == "" or ckpt_path is None:
             log.warning("Best ckpt not found! Using current weights for testing...")
             ckpt_path = None
         

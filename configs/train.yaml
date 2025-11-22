@@ -10,7 +10,7 @@ defaults:
   - optimizer: adamw       # 默认使用 adamw 优化器
   - scheduler: cosine      # 默认使用 cosine 调度器
   - callbacks: default     # 默认使用 default 回调
-  - logger: aim            # 默认使用 aim 日志记录器
+  - logger: aim_csv        # 默认使用 aim 和 csv 日志记录器
   - trainer: default       # 默认使用 default 训练器配置
   - paths: default
   - extras: default
@@ -30,11 +30,15 @@ defaults:
   - debug: null
 
 # --- 全局参数 ---
+# ...existing code...
 task_name: "train"
 tags: ["dev"]
-name: "default_run"  # 默认的运行名称
+name: "default_run"  # 可以在命令行通过 name=exp_name 覆盖
+
+save_ckpt: False  # 默认不保存 checkpoint，可在命令行通过 save_ckpt=True 开启
 
 train: True
+# ...existing code...
 test: True  # 在训练后运行测试
 
 ckpt_path: null

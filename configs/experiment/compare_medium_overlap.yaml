@@ -1,0 +1,32 @@
+# @package _global_
+
+defaults:
+  - override /data: spatial
+  - override /model: spatial_clip
+  - override /loss: clip
+
+tags: ["compare", "medium", "overlap"]
+
+data:
+  dataset_format: shards_v1
+  data_dir: ${paths.data_dir}/processed/hest_v1_human_medium
+  batch_size: 32
+  splits:
+    train: ["INT19", "INT21", "NCBI673", "NCBI674", "NCBI675", "NCBI681", "NCBI683", "NCBI684", "NCBI762", "NCBI763", "NCBI764", "NCBI776", "SPA125", "SPA126", "TENX122", "TENX124", "TENX125", "TENX128", "TENX138", "TENX144", "TENX153", "TENX154", "TENX155", "TENX156"]
+    val: ["TENX27", "TENX53", "TENX56", "TENX70", "TENX71"]
+    test: ["TENX72", "TENX73", "TENX90", "TENX92", "TENX99"]
+
+trainer:
+  max_epochs: 5
+  limit_train_batches: 1.0
+  limit_val_batches: 1.0
+  check_val_every_n_epoch: 1
+
+callbacks:
+  model_checkpoint:
+    monitor: "val/loss"
+    mode: "min"
+    save_top_k: 1
+    save_last: true
+
+save_ckpt: False

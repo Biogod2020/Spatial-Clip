@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spatial-CLIP Data Pipeline: From Coordinates to Loss</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --secondary: #475569;
+            --bg: #f8fafc;
+            --card-bg: #ffffff;
+            --text: #1e293b;
+            --code-bg: #1e1e1e;
+            --accent: #10b981;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            line-height: 1.6;
+            color: var(--text);
+            background-color: var(--bg);
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 60px;
+            padding-bottom: 40px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 800;
+            color: var(--primary);
+            margin-bottom: 16px;
+            letter-spacing: -0.025em;
+        }
+
+        h2 {
+            font-size: 1.8rem;
+            margin-top: 40px;
+            color: var(--text);
+            border-left: 4px solid var(--primary);
+            padding-left: 16px;
+        }
+
+        h3 {
+            font-size: 1.4rem;
+            color: var(--secondary);
+            margin-top: 30px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 32px;
+            margin-bottom: 32px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            transition: transform 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+
+        code {
+            font-family: 'Fira Code', monospace;
+            background: #f1f5f9;
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: #d946ef;
+            font-size: 0.9em;
+        }
+
+        pre {
+            background: var(--code-bg);
+            color: #e5e7eb;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 0.9rem;
+        }
+
+        .highlight {
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        .diagram-container {
+            display: flex;
+            justify-content: center;
+            margin: 40px 0;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .step-badge {
+            display: inline-block;
+            background: var(--primary);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 9999px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .math {
+            font-family: 'Times New Roman', serif;
+            font-style: italic;
+            background: #fffbeb;
+            padding: 2px 8px;
+            border-radius: 4px;
+            border: 1px solid #fcd34d;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 80px;
+            color: var(--secondary);
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <header>
+            <h1>Spatial-CLIP Data Pipeline</h1>
+            <p>A deep dive into how spatial topology is preserved from raw coordinates to the contrastive loss function.
+            </p>
+        </header>
+
+        <!-- Overview Section -->
+        <div class="card">
+            <span class="step-badge">Overview</span>
+            <h2>The Core Concept</h2>
+            <p>
+                Standard CLIP assumes that only the image and text from the <strong>exact same pair</strong> are
+                positive matches (diagonal of the similarity matrix).
+                Spatial-CLIP relaxes this assumption: <strong>images that are physically close to each other</strong> in
+                the tissue slide should also be considered semantically similar.
+            </p>
+            <p>
+                This document visualizes the three-stage pipeline that makes this possible:
+            </p>
+            <ol>
+                <li><strong>Dataset Layer:</strong> Computing neighbors via KNN.</li>
+                <li><strong>Transport Layer:</strong> Batching and collating metadata.</li>
+                <li><strong>Loss Layer:</strong> Transforming hard labels into spatially-aware soft labels.</li>
+            </ol>
+        </div>
+
+        <!-- Step 1: Dataset -->
+        <div class="card">
+            <span class="step-badge">Step 1: Dataset Layer</span>
+            <h2>Neighbor Discovery</h2>
+            <p>
+                In <code>ShardedSpatialDataset</code> (and Parquet backend), we don't rely on pre-computed adjacency
+                matrices. Instead, we compute relationships dynamically based on physical coordinates.
+            </p>
+
+            <h3>1. Coordinate Extraction</h3>
+            <p>Every image tile has metadata containing its centroid coordinates <span class="math">(x, y)</span>.</p>
+
+            <h3>2. K-Nearest Neighbors (KNN)</h3>
+            <p>
+                For every tile, we search for the <span class="math">K=6</span> nearest neighbors within the same tissue
+                sample.
+            </p>
+
+            <h3>3. Weight Calculation (Alpha)</h3>
+            <p>
+                We assign a weight <span class="math">α</span> to each neighbor based on inverse Euclidean distance.
+                Closer neighbors get higher weights.
+            </p>
+            <pre>
+# Simplified Logic
+distance = euclidean(tile_A, tile_B)
+weight = 1.0 / (distance + 1e-6)
+alpha = normalize(weight)  # Sum of alphas = 1.0</pre>
+
+            <div class="diagram-container">
+                <div class="mermaid">
+                    graph LR
+                    A[Tile A (x1, y1)] -->|KNN Search| B{Find Neighbors}
+                    B --> C[Neighbor 1 (d=5μm)]
+                    B --> D[Neighbor 2 (d=12μm)]
+                    B --> E[Neighbor 3 (d=20μm)]
+                    C -->|High Weight| F[Alpha = 0.6]
+                    D -->|Med Weight| G[Alpha = 0.3]
+                    E -->|Low Weight| H[Alpha = 0.1]
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2: Transport -->
+        <div class="card">
+            <span class="step-badge">Step 2: Transport Layer</span>
+            <h2>Data Collation</h2>
+            <p>
+                The <code>SpatialClipDataModule</code> doesn't just stack images and texts. It preserves the topological
+                graph structure within the batch.
+            </p>
+            <p>
+                Each item in a batch carries:
+            </p>
+            <ul>
+                <li><code>anchor_tile_id</code>: The global unique ID of the tile.</li>
+                <li><code>neighbor_tile_ids</code>: A list of global IDs for its neighbors.</li>
+                <li><code>neighbor_alphas</code>: The calculated weights.</li>
+            </ul>
+            <p>
+                <strong>Crucial Detail:</strong> These IDs are <em>Global</em> IDs, not batch indices. This allows us to
+                correctly identify if a neighbor happens to be in the current random batch.
+            </p>
+        </div>
+
+        <!-- Step 3: Loss -->
+        <div class="card">
+            <span class="step-badge">Step 3: Loss Layer</span>
+            <h2>Spatial Contrastive Loss</h2>
+            <p>
+                This is where the magic happens. In <code>SpatialLoss</code>, we transform the standard "Hard Label"
+                matrix into a "Soft Label" matrix.
+            </p>
+
+            <h3>The Transformation</h3>
+            <p>
+                Standard CLIP creates an Identity Matrix (diagonal = 1, others = 0) as the ground truth.
+                Spatial-CLIP modifies this matrix by "splatting" the neighbor weights onto the row.
+            </p>
+
+            <div class="diagram-container">
+                <div class="mermaid">
+                    graph TD
+                    subgraph Standard CLIP
+                    I[Image i] -->|Matches| T[Text i]
+                    end
+
+                    subgraph Spatial CLIP
+                    SI[Image i] -->|Matches| ST[Text i]
+                    SI -->|Also Matches| N1[Neighbor Text j]
+                    SI -->|Also Matches| N2[Neighbor Text k]
+
+                    linkStyle 1 stroke:#10b981,stroke-width:4px;
+                    linkStyle 2 stroke:#10b981,stroke-width:2px,stroke-dasharray: 5 5;
+                    linkStyle 3 stroke:#10b981,stroke-width:1px,stroke-dasharray: 5 5;
+                    end
+                </div>
+            </div>
+
+            <h3>Algorithm: In-Batch Matching</h3>
+            <p>
+                The loss function iterates through every sample in the batch:
+            </p>
+            <pre>
+# Pseudocode inside SpatialLoss.forward()
+labels = IdentityMatrix(BatchSize)
+
+for i in range(BatchSize):
+    neighbors = batch.neighbor_tile_ids[i]
+    weights = batch.neighbor_alphas[i]
+    
+    for n_id, w in zip(neighbors, weights):
+        # Check if this neighbor exists in the current batch
+        if n_id in batch.global_ids:
+            j = batch.global_ids.index(n_id)
+            
+            # Add soft label to the ground truth matrix
+            labels[i, j] += w * scale_factor</pre>
+
+            <p>
+                This results in a <strong>Dense Ground Truth Matrix</strong> where off-diagonal elements are non-zero if
+                spatial neighbors are present in the same batch.
+            </p>
+        </div>
+
+        <!-- Visual Summary -->
+        <div class="card">
+            <span class="step-badge">Summary</span>
+            <h2>Visualizing the Matrix</h2>
+            <p>
+                Below is a conceptual visualization of the target matrix used in the Loss calculation.
+            </p>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px;">
+                <div style="text-align: center;">
+                    <h3>Standard CLIP Target</h3>
+                    <div
+                        style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; background: #eee; padding: 10px; border-radius: 8px;">
+                        <!-- Row 1 -->
+                        <div style="background:#10b981; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <!-- Row 2 -->
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#10b981; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <!-- Row 3 -->
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#10b981; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <!-- Row 4 -->
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#10b981; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <!-- Row 5 -->
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#10b981; aspect-ratio:1;"></div>
+                    </div>
+                    <p style="font-size: 0.8rem; color: #666;">Only diagonal is 1.0</p>
+                </div>
+
+                <div style="text-align: center;">
+                    <h3>Spatial CLIP Target</h3>
+                    <div
+                        style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; background: #eee; padding: 10px; border-radius: 8px;">
+                        <!-- Row 1 -->
+                        <div style="background:#10b981; aspect-ratio:1;"></div>
+                        <div style="background:#86efac; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <!-- Row 2 -->
+                        <div style="background:#86efac; aspect-ratio:1;"></div>
+                        <div style="background:#10b981; aspect-ratio:1;"></div>
+                        <div style="background:#bbf7d0; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <!-- Row 3 -->
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#bbf7d0; aspect-ratio:1;"></div>
+                        <div style="background:#10b981; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <!-- Row 4 -->
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#10b981; aspect-ratio:1;"></div>
+                        <div style="background:#86efac; aspect-ratio:1;"></div>
+                        <!-- Row 5 -->
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#fff; aspect-ratio:1;"></div>
+                        <div style="background:#86efac; aspect-ratio:1;"></div>
+                        <div style="background:#10b981; aspect-ratio:1;"></div>
+                    </div>
+                    <p style="font-size: 0.8rem; color: #666;">Neighbors get partial credit (light green)</p>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            Generated by GitHub Copilot for Spatial-Clip Documentation
+        </footer>
+    </div>
+
+    <script>
+        mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
+    </script>
+</body>
+
+</html>

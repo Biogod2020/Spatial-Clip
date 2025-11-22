@@ -16,6 +16,7 @@ data/
 - `dataset_key` is declared in each Hydra config (see `configs/preprocess/*.yaml`).
 - You can keep the raw source wherever you like (local disk, mounted share, or symlink). The important part is that the config points to the canonical folder inside `data/raw/<dataset_key>`.
 - Intermediate + processed folders are safe to delete and regenerate at any time; the manifest captures enough provenance to rebuild them.
+- Training-time loaders now read the same outputs via the `dataset_format` toggle inside `configs/data/spatial.yaml`. Use `parquet_v1` for legacy `nodes.parquet`/`edges.parquet` splits and `shards_v1` to stream Stage‑3 tarballs + manifests (provide sample IDs per split under `splits.*`).
 
 ## 2. Configuring datasets with Hydra
 

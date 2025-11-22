@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Aion+ | 空间多模态神经科学研究项目宪章 v2.0</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="一份为MD-PhD Jay定制的、关于空间转录组学与组织病理学多模态AI研究的综合行动手册。融合了敏捷开发、严谨的科学方法论与前沿的深度学习实践。">
+    <style>
+        :root {
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+            --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+                --bg-base: #ffffff; /* light background */
+                --bg-surface: #ffffff; /* surface (cards/sections) */
+                --bg-muted: #f8fafc; /* subtle surface */
+                --text-base: #0f172a; /* dark text */
+                --text-muted: #475569; /* mid-muted */
+                --text-faint: #6b7280; /* faint */
+                --border-base: #e6e9ef; /* light border */
+                --border-highlight: #c7d2fe; /* gentle highlight */
+            --primary: #0ea5e9; /* keep primary accent as sky-blue */
+            /* Sky Blue */
+            --primary-light: rgba(14, 165, 233, 0.08);
+            --primary-border: rgba(14, 165, 233, 0.18);
+            --secondary: #8b5cf6;
+            /* Violet */
+            --danger: #ef4444;
+            /* Rose */
+            --warning: #f59e0b;
+            /* Amber */
+            --success: #16a34a;
+            /* Green */
+            --radius-md: 8px;
+            --radius-lg: 16px;
+            --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.15);
+            --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.2), 0 2px 4px -2px rgb(0 0 0 / 0.2);
+            --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            margin: 0;
+            font-family: var(--font-sans);
+            background-color: var(--bg-base);
+            color: var(--text-base);
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            font-size: 16px;
+            line-height: 1.7;
+        }
+
+        .container {
+            max-width: 1024px;
+            margin: 0 auto;
+            padding: 3rem 1.5rem 5rem;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 4rem;
+            padding: 2rem 1rem;
+            border: 1px solid var(--border-base);
+            border-radius: var(--radius-lg);
+            background: linear-gradient(145deg, var(--bg-surface), var(--bg-base) 70%),
+                radial-gradient(circle at top left, rgba(14, 165, 233, 0.1), transparent 40%),
+                radial-gradient(circle at bottom right, rgba(139, 92, 246, 0.1), transparent 50%);
+            box-shadow: var(--shadow-lg);
+        }
+
+        header h1 {
+            font-size: clamp(2.25rem, 5vw, 3rem);
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            background: linear-gradient(90deg, #6366f1, var(--primary), #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin: 0 0 1rem;
+        }
+
+        header .subtitle {
+            font-size: 1.1rem;
+            color: var(--text-muted);
+            max-width: 800px;
+            margin: 0 auto;
+            line-height: 1.8;
+        }
+
+        header .metadata {
+            margin-top: 1.5rem;
+            display: flex;
+            justify-content: center;
+            gap: 1.5rem;
+            font-size: 0.875rem;
+            color: var(--text-faint);
+        }
+
+        main>section {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-base);
+            border-radius: var(--radius-lg);
+            padding: 2rem;
+            margin-bottom: 2.5rem;
+            box-shadow: var(--shadow-md);
+            transition: all 0.2s ease-in-out;
+        }
+
+        main>section:hover {
+            border-color: var(--border-highlight);
+        }
+
+        h2 {
+            font-size: 1.75rem;
+            font-weight: 700;
+            margin: 0 0 1.5rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid var(--border-base);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        h2 .icon {
+            font-size: 1.5rem;
+            color: var(--primary);
+        }
+
+        h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin: 2rem 0 1rem;
+            color: var(--text-base);
+        }
+
+        p,
+        ul,
+        ol {
+            font-size: 1rem;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+        }
+
+        li {
+            margin-bottom: 0.5rem;
+        }
+
+        strong {
+            color: var(--text-base);
+            font-weight: 600;
+        }
+
+        code {
+            font-family: var(--font-mono);
+            background: #eef2ff; /* subtle token background */
+            color: var(--primary);
+            padding: 0.2em 0.4em;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+
+        pre {
+            background: var(--bg-muted);
+            border: 1px solid var(--border-base);
+            border-radius: var(--radius-md);
+            padding: 1.25rem;
+            overflow-x: auto;
+            font-size: 0.9rem;
+            box-shadow: var(--shadow-sm);
+            color: var(--text-muted);
+        }
+
+        pre code {
+            background: none;
+            padding: 0;
+            color: var(--text-base);
+            line-height: 1.6;
+        }
+
+        .callout {
+            padding: 1.5rem;
+            border-radius: var(--radius-md);
+            margin: 1.5rem 0;
+            border-left-width: 4px;
+            border-left-style: solid;
+        }
+
+        .callout.info {
+            background-color: var(--primary-light);
+            border-color: var(--primary);
+        }
+
+        .callout.warning {
+            background-color: rgba(245, 158, 11, 0.1);
+            border-color: var(--warning);
+        }
+
+        .callout.danger {
+            background-color: rgba(244, 63, 94, 0.1);
+            border-color: var(--danger);
+        }
+
+        .callout .title {
+            font-weight: 700;
+            color: var(--text-base);
+            margin: 0 0 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .table-container {
+            border: 1px solid var(--border-base);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            margin: 1.5rem 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.95rem;
+        }
+
+        th,
+        td {
+            padding: 0.75rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-base);
+        }
+
+        th {
+            background: var(--bg-muted);
+            font-weight: 600;
+            color: var(--text-base);
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        .mermaid {
+            background: var(--bg-surface);
+            padding: 1.5rem;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-base);
+            margin: 1.5rem 0;
+            text-align: center;
+        }
+    </style>
+                        <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>
+        // Global Mermaid configuration - light/default theme
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'default',
+            themeVariables: {
+                'primaryColor': '#ffffff',
+                'primaryTextColor': '#0f172a',
+                'primaryBorderColor': '#e6e9ef',
+                'lineColor': '#c7d2fe',
+                'secondaryColor': '#f8fafc',
+                'tertiaryColor': '#ffffff'
+            }
+        });
+    </script>
+</head>
+
+<body>
+
+    <div class="container">
+        <header>
+            <h1>空间多模态神经科学研究项目宪章 v2.0</h1>
+            <p class="subtitle">
+                你好，Jay。这份文档是我们合作的基石，一个动态的、不断演进的行动手册。它专为你的MD-PhD研究——利用多模态AI探索阿尔茨海默病（AD）的空间生物学——而设计。我们将遵循“北极星目标”：产出具有临床价值、可发表、可复现的研究成果。
+            </p>
+            <div class="metadata">
+                <span>版本: 2.0 (Aion+ 增强版)</span>
+                <span>更新日期: 2025年11月18日</span>
+                <span>负责人: Jay & Aion+</span>
+            </div>
+        </header>
+
+        <main>
+            <section id="philosophy">
+                <h2><span class="icon">🧭</span>1. 研究哲学：从临床问题到计算假设</h2>
+                <p>我们所有工作的出发点，永远是那个最根本的神经科学问题。技术是探索问题的工具，而不是目标。这个原则能防止我们陷入“拿着锤子找钉子”的陷阱。</p>
+
+                <h3>A. 直接回答 (Direct Answer)</h3>
+                <p>我们的核心工作流遵循“问题驱动”的科学方法论。每一步都必须清晰地服务于一个具体的生物学或临床假设。</p>
+                <div class="mermaid-container">
+                    <!-- Mermaid will be initialized globally in the document head. -->
+                    <div class="mermaid">
+graph TD
+    A["临床观察/生物学问题<br>(例如：为何AD患者特定脑区的神经元更易受损?)"] --> B["形式化为计算任务<br>(例如：预测Spot周围的病理微环境类别)"]
+    B --> C["数据采集与表征<br>(H&E图像, 空间基因表达谱)"]
+    C --> D["构建基线模型 (Baseline)<br>(例如：ResNet + MLP)"]
+    D --> E["迭代与模型改进<br>(例如：引入GNN, 对比学习)"]
+    E --> F["模型评估与验证<br>(AUC, AUPRC, C-Index)"]
+    F --> G["生物学解释与新假设生成<br>(特征归因, 空间富集分析)"]
+    G --> A
+
+    subgraph 核心循环
+        D --> E --> F --> G
+    end
+
+    style A fill:#0ea5e9,stroke:#111827,stroke-width:2px,color:#fff
+    style G fill:#8b5cf6,stroke:#111827,stroke-width:2px,color:#fff
+                    </div>
+                </div>
+
+                <h3>B. 机理/背景 (Deeper Insight)</h3>
+                <p>在生物医学AI领域，模型的性能指标（如AUC达到0.95）本身意义有限。一个“黑箱”模型即使预测再准，如果不能提供可解释的生物学机制，就无法推动科学认知，也难以转化为临床应用。因此，我们的每一次模型架构调整、每一次损失函数的设计，都必须回答一个问题：“这个改动预期会帮助我们从数据中‘看到’什么新的生物学模式？”
+                </p>
+
+                <h3>C. 跨学科连接 (Integration)</h3>
+                <p><strong>神经病学连接：</strong>
+                    以你的AD研究为例，一个具体的科学问题可能是：“在Braak分期不同的AD患者海马体CA1区，tau蛋白阳性神经元周围的星形胶质细胞和微胶质细胞的基因表达特征和空间构象有何差异？”</p>
+                <ul>
+                    <li><strong>计算任务转化：</strong> 这可以被转化为一个多任务学习问题：1) 图像patch分类（tau阳性 vs. 阴性）；2) 基于GNN的邻域细胞交互建模；3)
+                        预测邻近胶质细胞的特定基因模块（gene module）的表达水平。</li>
+                    <li><strong>临床意义：</strong> 模型的输出不仅仅是一个预测分数，而是可能揭示一种新的、与疾病进展相关的“细胞社会网络（cellular social
+                        network）”模式，为早期诊断或干预提供新靶点。</li>
+                </ul>
+            </section>
+
+            <section id="roadmap">
+                <h2><span class="icon">🗺️</span>2. 全局路线图：从0到1的结构化路径</h2>
+                <p>一个博士课题的成功，关键在于将宏大的目标分解为一系列可管理、可验证的里程碑。这是我们的全局作战地图。</p>
+
+                <h3>A. 直接回答 (Direct Answer)</h3>
+                <p>我们将项目分为四个主要阶段，每个阶段都有明确的交付成果和时间预期。</p>
+                <div class="mermaid-container">
+                    <div class="mermaid">
+gantt
+    title "空间多模态AI研究项目路线图"
+    dateFormat  YYYY-MM-DD
+    axisFormat  %m/%d
+    section "阶段0: 奠基 (Foundation)"
+    任务与模块定义      :done, p0_1, 2025-11-18, 2d
+    数据管线(Pipeline)初建 :active, p0_2, 2025-11-20, 3d
+    
+    section "阶段1: 基线建立 (Baseline)"
+    三级数据集切分      :p1_1, after p0_2, 5d
+    实现简单基线模型    :p1_2, after p1_1, 7d
+    在Debug集上过拟合   :p1_3, after p1_2, 1d
+    
+    section "阶段2: 迭代与优化 (Iteration)"
+    三层循环常规化      :crit, p2_1, after p1_3, 60d
+    引入GNN/Transformer   :p2_2, after p2_1, 14d
+    探索对比学习      :p2_3, after p2_2, 21d
+    
+    section "阶段3: 验证与解读 (Validation)"
+    冠军模型全量训练    :p3_1, after p2_3, 10d
+    鲁棒性与OOD测试     :p3_2, after p3_1, 14d
+    生物学解释与可视化  :p3_3, after p3_2, 21d
+    论文初稿撰写      :p3_4, after p3_3, 30d
+                    </div>
+                </div>
+
+                <h3>B. 机理/背景 (Deeper Insight)</h3>
+                <ul>
+                    <li><strong>为什么需要“阶段0”？</strong>
+                        所谓“磨刀不误砍柴工”。在写任何复杂的模型代码之前，清晰地定义输入输出、模块接口和数据格式，可以避免后期的大规模重构。这是一个架构设计阶段。</li>
+                    <li><strong>为什么“基线”如此重要？</strong>
+                        基线模型是你科学探索的“参照系”。它简单、透明，能帮你确认整个数据处理和训练流程是通的。任何后续的复杂模型，其性能提升都必须与这个简单的基线进行比较，才能证明其“附加值（added
+                        value）”。如果你的复杂模型还不如一个简单的逻辑回归，那说明问题很可能出在数据或流程上，而不是模型不够复杂。</li>
+                </ul>
+            </section>
+
+            <section id="task-design">
+                <h2><span class="icon">🎯</span>3. 任务定义与模块化设计</h2>
+                <p>这一步是“翻译”工作：将模糊的生物学问题，精确地翻译成机器可以理解和优化的数学任务。同时，我们将设计一个“乐高式”的模块化系统，便于后续的实验和消融研究。</p>
+
+                <h3>A. 直接回答 (Direct Answer)</h3>
+                <p>我们初期聚焦于一个核心预测任务和一个下游分析任务。</p>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>任务类型</th>
+                                <th>具体示例 (for your AD project)</th>
+                                <th>输入 (Input)</th>
+                                <th>输出 (Output)</th>
+                                <th>核心评估指标 (Metric)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><strong>核心预测任务</strong></td>
+                                <td>基于H&E图像和空间基因表达，预测每个spot的病理微环境（如：Aβ斑块核心区、反应性胶质细胞包围区、相对健康区）</td>
+                                <td>- 图像Patch (224x224x3)<br>- Spot基因表达向量 (1xG)</td>
+                                <td>微环境类别 (one-hot vector)</td>
+                                <td>AUROC, AUPRC (多分类), F1-score</td>
+                            </tr>
+                            <tr>
+                                <td><strong>下游分析任务</strong></td>
+                                <td>分析模型学习到的多模态表征与临床变量（如MMSE认知评分、Braak分期）的相关性</td>
+                                <td>- 模型融合层输出的特征向量 (1xD)</td>
+                                <td>临床变量 (连续值或序数)</td>
+                                <td>Pearson/Spearman 相关系数, R²</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <h3>D. 方法与数学 (Method & Math)</h3>
+                <p>模块化的核心是定义清晰的接口（输入/输出张量形状）。</p>
+                <div class="mermaid-container">
+                    <div class="mermaid">
+graph TD
+    subgraph "输入数据 (Input Data)"
+        I["H&E Image Patch<br>(B, C, H, W) = (B, 3, 224, 224)"]
+        G["Gene Expression Vector<br>(B, N_genes)"]
+    end
+
+    subgraph "模型组件 (Model Modules)"
+        style EncI fill:#0284c7,stroke:#fff
+        style EncG fill:#4f46e5,stroke:#fff
+        style Fusion fill:#be185d,stroke:#fff
+        style Head fill:#16a34a,stroke:#fff
+        
+        EncI["Image Encoder (e.g., ResNet50)"]
+        EncG["Gene Encoder (e.g., MLP)"]
+        Fusion["Fusion Module (e.g., Attention)"]
+        Head["Task Head (e.g., Linear Classifier)"]
+    end
+
+    subgraph "输出 (Output)"
+        O["Prediction Logits<br>(B, N_classes)"]
+    end
+    
+    I -->|"f_img(·)"| EncI
+    G -->|"f_gene(·)"| EncG
+    
+    EncI --> Z_I["Image Embedding<br>(B, D_img)"]
+    EncG --> Z_G["Gene Embedding<br>(B, D_gene)"]
+
+    Z_I --> Fusion
+    Z_G --> Fusion
+    
+    Fusion --> Z_fused["Fused Representation<br>(B, D_fused)"]
+    
+    Z_fused --> Head
+    
+    Head --> O
+                    </div>
+                </div>
+
+                <h3>E. 代码/实验草案 (Code/Experiment Sketch)</h3>
+                <pre><code class="language-python">
+# Aion+ | Code Sketch for a Modular Spatial Multimodal Model
+import torch
+import torch.nn as nn
+
+class SpatialMultimodalModel(nn.Module):
+    def __init__(self, image_encoder, gene_encoder, fusion_module, task_head):
+        super().__init__()
+        self.image_encoder = image_encoder
+        self.gene_encoder = gene_encoder
+        self.fusion_module = fusion_module
+        self.task_head = task_head
+
+    def forward(self, image_patch, gene_vector):
+        # Input shapes:
+        # image_patch: [B, 3, 224, 224]
+        # gene_vector: [B, 2000] # Assuming 2000 HVGs
+
+        # 1. Encode each modality
+        # z_img: [B, 512]
+        z_img = self.image_encoder(image_patch)
+
+        # z_gene: [B, 256]
+        z_gene = self.gene_encoder(gene_vector)
+
+        # 2. Fuse representations
+        # z_fused: [B, 768] or whatever the fusion output is
+        z_fused = self.fusion_module(z_img, z_gene)
+
+        # 3. Pass through task-specific head
+        # logits: [B, num_classes]
+        logits = self.task_head(z_fused)
+
+        return logits
+
+# Example Usage:
+# You can easily swap components for ablation studies.
+# For baseline:
+# image_encoder_baseline = ResNet18(...)
+# fusion_baseline = lambda z_img, z_gene: torch.cat([z_img, z_gene], dim=-1) # Simple concatenation
+# model_baseline = SpatialMultimodalModel(image_encoder_baseline, ...)
+
+# For advanced model:
+# image_encoder_advanced = ViT(...)
+# fusion_advanced = CrossAttentionModule(...)
+# model_advanced = SpatialMultimodalModel(image_encoder_advanced, ...)
+            </code></pre>
+            </section>
+
+            <section id="data">
+                <h2><span class="icon">💾</span>4. 数据策略：三级数据集与敏捷迭代</h2>
+                <p>这是整个敏捷框架中最核心、最关键的一环。错误的数据策略会导致大量时间的浪费。我们的“三级数据集”策略，就是为了确保在正确规模的数据上，做正确的事情。</p>
+
+                <h3>A. 直接回答 (Direct Answer)</h3>
+                <p>我们将数据严格划分为三个层级，服务于不同周期的循环。</p>
+                <div class="mermaid-container">
+                    <div class="mermaid">
+graph LR
+    subgraph "全量数据集 (Full Dataset)"
+        direction LR
+        D["全量数据 (100%)<br>- 用于最终模型训练与评估<br>- 触发宏观循环 (Macro-loop)"]
+    end
+    
+    subgraph "开发子集 (Dev Subset)"
+        direction LR
+        C["Dev子集 (~10-20%)<br>- 用于模型配置比较、超参微调<br>- 触发中观循环 (Meso-loop)"]
+    end
+    
+    subgraph "调试子集 (Debug Subset)"
+        direction LR
+        B["Debug子集 (~1-2%)<br>- 用于代码冒烟测试、过拟合测试<br>- 触发微观循环 (Micro-loop)"]
+    end
+    
+    B -- "验证通过" --> C
+    C -- "筛选出冠军配置" --> D
+
+    style B fill:#f59e0b,color:#000
+    style C fill:#0ea5e9,color:#fff
+    style D fill:#22c55e,color:#fff
+                </pre>
+                </div>
+
+                <h3>B. 机理/背景 (Deeper Insight)</h3>
+                <p>这个策略的本质是“风险控制”和“快速反馈”。</p>
+                <ul>
+                    <li><strong>Debug子集</strong>的唯一目标是验证代码逻辑。你能在这个极小的数据集上过拟合（训练集准确率100%，损失接近0），就证明你的模型有足够的“学习能力（capacity）”，并且你的训练流程没有bug。这是一个成本最低的“单元测试”。
+                    </li>
+                    <li><strong>Dev子集</strong>是你的“试验田”。在这里，你可以用可控的成本（几小时而不是几天）比较不同的模型架构、学习率、损失函数。它的关键在于代表性——其数据分布应尽可能模拟全量数据，以保证在这里得出的结论能泛化到最终任务上。
+                    </li>
+                    <li><strong>全量数据</strong>是“圣杯”。只有经过Dev子集验证的、最有希望的1-2个“冠军配置”，才有资格在全量数据上进行昂贵的、耗时的训练。这可以最大化计算资源的利用效率。
+                    </li>
+                </ul>
+
+                <h3>F. 批判性视角 (Critical View)</h3>
+                <div class="callout warning">
+                    <p class="title"><span class="icon">⚠️</span>警惕数据泄露 (Data Leakage)</p>
+                    <p>三级数据集的划分必须在<strong>病人（patient）</strong>或<strong>样本（sample/slide）</strong>级别上进行，而不是spot/patch级别。否则，来自同一个病人的数据点可能同时出现在训练集和验证集，导致模型性能被严重高估，因为模型可能只是“记住”了病人的特异性特征，而不是学习到了通用的生物学规律。这在论文评审中是致命的错误。
+                    </p>
+                </div>
+
+                <h3>E. 代码/实验草案 (Code/Experiment Sketch)</h3>
+                <pre><code class="language-python">
+# Aion+ | Patient-level data splitting strategy
+import numpy as np
+from sklearn.model_selection import train_test_split
+
+# Assume `metadata` is a pandas DataFrame with 'patient_id' and 'label' columns
+all_patient_ids = metadata['patient_id'].unique()
+labels = metadata.groupby('patient_id')['label'].first() # Ensure stratified split
+
+# Split full data into train and test at patient level
+train_val_patients, test_patients = train_test_split(
+    all_patient_ids, test_size=0.15, stratify=labels, random_state=42
+)
+
+# Split train_val into train and dev
+train_patients, dev_patients = train_test_split(
+    train_val_patients, test_size=0.2, random_state=42 # ~17% of total for dev
+)
+
+# Create debug set from a small fraction of the training set
+debug_patients, _ = train_test_split(
+    train_patients, train_size=0.05, random_state=42 # ~5% of train for debug
+)
+
+print(f"Total patients: {len(all_patient_ids)}")
+print(f"Train patients: {len(train_patients)}")
+print(f"Dev patients: {len(dev_patients)}")
+print(f"Test patients: {len(test_patients)}")
+print(f"Debug patients: {len(debug_patients)}")
+
+# Now, build your PyTorch Datasets using these patient ID lists to filter the data.
+            </code></pre>
+            </section>
+
+            <section id="loops">
+                <h2><span class="icon">🔄</span>5. 三层循环：科研迭代的引擎</h2>
+                <p>这是将上述所有理念付诸实践的日常工作流。它将宏大的研究目标分解为以分钟、小时和天为周期的具体行动，让你始终保持高效和专注。</p>
+
+                <h3>A. 直接回答 (Direct Answer)</h3>
+                <p>我们的工作由三个嵌套的循环驱动：微观、中观、宏观。</p>
+                <div class="mermaid-container">
+                    <div class="mermaid">
+graph TD
+    subgraph "宏观循环 (Macro-Loop)"
+        direction LR
+        M1["在全量数据上训练冠军配置"] --> M2["进行深入的生物学/临床分析"]
+        M2 --> M3["撰写报告/论文部分"]
+        M3 --> M4["形成新的科学假设"]
+    end
+    
+    subgraph "中观循环 (Meso-Loop)"
+        direction LR
+        S1["在Dev子集上比较2-3个候选方案"] --> S2["分析验证曲线, 筛选超参"]
+        S2 --> S3["选出1-2个'冠军配置'进入宏观循环"]
+    end
+    
+    subgraph "微观循环 (Micro-Loop)"
+        direction LR
+        T1["新代码/改动"] --> T2["在Debug子集上冒烟测试 (1-2 batches)"]
+        T2 --> T3["在Debug子集上过拟合测试"]
+        T3 --> T4["代码通过, 进入中观循环"]
+    end
+    
+    T4 -- "提交方案" --> S1
+    S3 -- "选定冠军" --> M1
+    M4 -- "提出新想法" --> T1
+
+    style T1 fill:#f59e0b,color:#000
+    style S1 fill:#0ea5e9,color:#fff
+    style M1 fill:#22c55e,color:#fff
+                </pre>
+                </div>
+
+                <h3>B. 机理/背景 (Deeper Insight) - 用实验科学类比</h3>
+                <ul>
+                    <li><strong>微观循环 (Micro-Loop) ↔️ 单管PCR验证：</strong>
+                        当你设计了一对新引物（新代码/模块），你不会直接用到珍贵的病人样本上。你会先用模板DNA跑一个单管PCR，确保能扩增出正确大小的条带（过拟合测试），并且没有污染（冒烟测试）。这个循环以分钟计，快速验证工具本身是否工作正常。
+                    </li>
+                    <li><strong>中观循环 (Meso-Loop) ↔️ 96孔板筛选：</strong>
+                        当你的引物验证通过后，你可能会在一个96孔板上测试不同的Mg²⁺浓度、退火温度（超参数），以找到最佳反应条件。这个循环以小时计，目标是在可控成本下，从多个“好”的选项中找到“最好”的那个。
+                    </li>
+                    <li><strong>宏观循环 (Macro-Loop) ↔️ 正式队列研究：</strong>
+                        只有找到了最优条件，你才会启动对整个病人队列（全量数据）的大规模实验。这个循环以天或周计，目标是产生最终的、可发表的科学结论，并进行深入的生物学解读。</li>
+                </ul>
+
+                <div class="callout danger">
+                    <p class="title"><span class="icon">🚫</span>最常见的失败模式</p>
+                    <p>一个改动在<strong>微观循环</strong>中都无法成功过拟合，却直接被用于<strong>宏观循环</strong>。这相当于用一对无效的引物去跑一个为期数周的队列研究，结果必然是浪费时间和计算资源，且一无所获。<strong>必须严格遵守循环的层级关系。</strong>
+                    </p>
+                </div>
+
+                <h3>H. 检查你的理解 (Check Your Understanding)</h3>
+                <ol>
+                    <li>当你新实现了一个复杂的注意力融合模块后，你的第一步应该是什么？在哪个数据集上做？期望的结果是什么？</li>
+                    <li>如果两个模型A和B在Dev子集上的AUC分别是0.85和0.86，但模型A的训练时间是模型B的三分之一，你会如何决策？为什么？</li>
+                </ol>
+            </section>
+
+            <section id="peft">
+                <h2><span class="icon">⚡</span>6. PEFT/LoRA：加速探索的涡轮增压器</h2>
+                <p>在我们的研究中，我们经常需要使用强大的预训练模型（如CLIP的图像编码器）。但全量微调这些庞然大物既耗时又耗卡。PEFT (Parameter-Efficient
+                    Fine-Tuning)，特别是LoRA (Low-Rank Adaptation)，是解决这个问题的利器。</p>
+
+                <h3>A. 直接回答 (Direct Answer)</h3>
+                <p>LoRA的核心思想是：在预训练模型的现有权重（冻结不动）旁边，增加小型的、可训练的“旁路”模块。我们只训练这些小模块，从而用极低的成本（约0.1-1%的可训练参数）来适配模型到我们的新任务上。</p>
+
+                <h3>D. 方法与数学 (Method & Math)</h3>
+                <p>对于一个预训练的权重矩阵 $W_0 \in \mathbb{R}^{d \times k}$，全量微调会更新整个 $W_0$。而LoRA假设任务相关的权重更新 $\Delta W$
+                    是低秩（low-rank）的，因此可以被分解为两个小矩阵的乘积：$\Delta W = B A$，其中 $B \in \mathbb{R}^{d \times r}$，$A \in
+                    \mathbb{R}^{r \times k}$，而秩 $r \ll \min(d, k)$。
+
+                    在前向传播时，计算变为：
+                    $$ h = W_0 x + \Delta W x = W_0 x + B A x $$
+                    我们只训练 $A$ 和 $B$。参数量从 $d \times k$ 降到了 $r \times (d+k)$，极大地减少了计算和存储开销。</p>
+
+                <div class="mermaid-container">
+                    <div class="mermaid">
+graph TD
+    subgraph "原始Transformer层 (冻结)"
+        W_q["W_q (d x d)"]
+        W_k["W_k (d x d)"]
+        W_v["W_v (d x d)"]
+    end
+    
+    subgraph "LoRA适配器 (可训练)"
+        style A fill:#f43f5e,stroke:#fff,color:#fff
+        style B fill:#f43f5e,stroke:#fff,color:#fff
+        A["A (r x d)"]
+        B["B (d x r)"]
+    end
+
+    X["输入 x (batch, d)"] --> W_q
+    X --> A
+    A --> B
+    B -- "输出 BAx" --> Sum1["(+)"]
+    W_q -- "输出 W_q x" --> Sum1
+    Sum1 --> Q["最终Query"]
+    
+    %% K, V 的处理与 Q 类似，这里省略
+                </pre>
+                </div>
+
+                <h3>B. 机理/背景 (Deeper Insight)</h3>
+                <p>LoRA在我们的工作流中，主要用于<strong>中观循环</strong>。你可以把它看作一种“快速原型验证（rapid
+                    prototyping）”工具。比如，你想比较三种不同的损失函数，如果用全量微调，可能每个实验都要跑一天。但用LoRA，每个实验可能只需要1-2小时。这使得你可以在一天内完成对比，快速筛掉不好的想法，然后只把最有希望的那个方案投入到昂贵的全量微调中。
+                </p>
+
+                <div class="callout info">
+                    <p class="title"><span class="icon">💡</span>Aion+ Pro-Tip</p>
+                    <p>将LoRA视为一个“方向盘”，而不是“引擎”。它帮你快速调整方向，找到正确的赛道。一旦赛道确定，你可能还是需要换上“全功能引擎”（全量微tuning）来跑出最佳成绩。因此，在最终发表的论文中，你可能会报告全量微调的结果，而LoRA是你达到这个结果的过程中的一个高效工具。
+                    </p>
+                </div>
+            </section>
+
+            <section id="conclusion">
+                <h2><span class="icon">🚀</span>7. 行动指南与下一步</h2>
+                <p>这份文档不是用来束之高阁的，而是我们日常工作的行动指南。当你遇到困惑时，回到这里，按图索骥。</p>
+
+                <h3>G. 下一步 (Next Steps)</h3>
+                <ol>
+                    <li><strong>行动项 (Action Item):</strong> 你的首要任务是完成“阶段0”和“阶段1”。具体来说，本周内我们需要：
+                        <ul>
+                            <li><strong>[产出1: 代码]</strong> 搭建好你的数据加载和预处理脚本，并严格按照病人ID切分出Debug/Dev/Test三级数据集。</li>
+                            <li><strong>[产出2: 模型]</strong> 实现一个最简单的基线模型（例如，预训练的ResNet18作为图像编码器，一个简单的MLP作为基因编码器，通过拼接融合）。
+                            </li>
+                            <li><strong>[产出3: 报告]</strong> 在我们的下次会议上，展示你的模型在Debug子集上成功过拟合的训练曲线（loss和accuracy）。</li>
+                        </ul>
+                    </li>
+                    <li><strong>核心阅读 (Core Reading):</strong>
+                        <ul>
+                            <li><strong>LoRA:</strong> Hu, E. J., et al. (2021). "LoRA: Low-Rank Adaptation of Large
+                                Language Models." arXiv:2106.09685. (理解其核心思想)</li>
+                            <li><strong>空间组学综述:</strong> Moses, L., & Pachter, L. (2022). "Museum of spatial
+                                transcriptomics." Nature Methods. (巩固生物学背景)</li>
+                        </ul>
+                    </li>
+                    <li><strong>决策规则 (Decision Rule):</strong> 如果基线模型在Dev集上的AUC低于0.65，我们不急于改进模型，而是优先回头检查数据质量、预处理和标签的准确性。
+                    </li>
+                </ol>
+
+                <div class="callout info">
+                    <p class="title"><span class="icon">💬</span>最后的话</p>
+                    <p>Jay，请记住，科研的道路充满了不确定性。这个框架的目的不是消除不确定性，而是为你提供一个结构化的方法来拥抱和探索它。犯错是正常的，负结果也是有价值的数据。关键在于我们能否快速地、低成本地犯错，并从每次迭代中学习。我们的三层循环正是为此而设计的。
+                    </p>
+                    <p>让我们开始吧。</p>
+                </div>
+            </section>
+        </main>
+    </div>
+
+</body>
+
+</html>
